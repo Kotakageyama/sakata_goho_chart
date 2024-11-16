@@ -171,6 +171,9 @@ class TransformerStrategy(Strategy):
         """
         Calculate adaptive take-profit and stop-loss levels.
         Uses simple percentage-based calculations with ATR scaling.
+        Ensures proper price ordering for both long and short positions:
+        Long: SL < Entry < TP
+        Short: TP < Entry < SL
         """
         # Base percentage moves (1% minimum)
         base_tp_percent = 0.01
@@ -180,17 +183,27 @@ class TransformerStrategy(Strategy):
         tp_mult = max(self.tp_atr_multiplier[-1], 0.5)
         sl_mult = max(self.sl_atr_multiplier[-1], 0.3)
 
-        # Scale percentages by ATR multiplier
-        tp_percent = base_tp_percent * tp_mult
-        sl_percent = base_sl_percent * sl_mult
+        # Scale percentages by ATR multiplier and current price level
+        atr_scale = current_atr / entry_price
+        tp_percent = max(base_tp_percent, atr_scale * tp_mult)
+        sl_percent = max(base_sl_percent, atr_scale * sl_mult)
 
-        # Calculate prices
+        # Calculate prices ensuring proper order relative to entry price
         if self.position.is_long:
+            # Long position: SL < Entry < TP
             tp_price = entry_price * (1 + tp_percent)
             sl_price = entry_price * (1 - sl_percent)
-        else:  # Short position
-            tp_price = entry_price * (1 - tp_percent)
-            sl_price = entry_price * (1 + sl_percent)
+        else:
+            # Short position: TP < Entry < SL
+            # For shorts, we need smaller percentages to maintain proper order
+            tp_price = entry_price * (1 - tp_percent * 0.5)  # Closer to entry
+            sl_price = entry_price * (1 + sl_percent * 0.5)  # Closer to entry
+
+        # Final validation
+        if self.position.is_long:
+            assert sl_price < entry_price < tp_price, "Invalid price ordering for long position"
+        else:
+            assert tp_price < entry_price < sl_price, "Invalid price ordering for short position"
 
         return tp_price, sl_price
 
