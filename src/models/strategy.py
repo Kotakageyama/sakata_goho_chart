@@ -1,12 +1,11 @@
 """
-Improved TransformerStrategy for backtesting with the enhanced model.
-Includes dynamic position sizing, risk management, and market regime detection.
+Enhanced Transformer-based trading strategy implementation.
 """
-from backtesting import Strategy
-from backtesting.lib import crossover, cross
+from typing import Tuple
 import numpy as np
 import pandas as pd
-from typing import Optional, Tuple
+from backtesting import Strategy
+from backtesting.lib import crossover
 from sklearn.cluster import KMeans
 
 class TransformerStrategy(Strategy):
@@ -14,43 +13,42 @@ class TransformerStrategy(Strategy):
     Enhanced Transformer-based trading strategy with dynamic risk management
     and market regime detection.
     """
-    def init(self):
+    def __init__(self):
         """Initialize strategy parameters and indicators."""
-        # Load price data and predictions
-        self.close = self.data.Close
-        self.price_pred = self.data.price_pred
-        self.direction_pred = self.data.direction_pred
+        super().__init__()
+
+        # Model predictions will be stored here
+        self.predictions = None  # Will be set externally
+
+        # Strategy parameters
+        self.n_lookback = 20
+        self.max_drawdown = 0.15  # 15% maximum drawdown
+        self.current_drawdown = 0
+        self.position_size = 0.1  # Base position size (10% of equity)
+        self.min_confidence = 0.6  # Minimum prediction confidence
 
         # Technical indicators
-        self.sma_fast = self.I(lambda: pd.Series(self.close).rolling(window=10).mean())
-        self.sma_slow = self.I(lambda: pd.Series(self.close).rolling(window=20).mean())
-        self.rsi = self.I(lambda: self._calculate_rsi_series())
-        self.atr = self.I(lambda: self._calculate_atr_series())
-        self.volatility = self.I(lambda: pd.Series(self.close).pct_change().rolling(window=20).std())
-
-        # Market regime detection
+        self.rsi = self.I(self._calculate_rsi_series)
+        self.atr = self.I(self._calculate_atr_series)
         self.regime = self.I(self._detect_market_regime)
 
-        # Adaptive multipliers for take profit and stop loss
+        # Adaptive multipliers for take-profit and stop-loss
         self.tp_atr_multiplier = self.I(self._adaptive_tp_multiplier)
         self.sl_atr_multiplier = self.I(self._adaptive_sl_multiplier)
 
-        # Strategy parameters
-        self.min_confidence = 0.6
-        self.max_drawdown = 0.15
-        self.position_size = 1.0
+        # Store predictions as indicators
+        self.price_pred = None
+        self.direction_pred = None
 
-        # Performance tracking
-        self.peak_value = self.equity
-        self.current_drawdown = 0.0
-
-        # Risk management
-        self.tp_base = 0.03  # Base take profit (3%)
-        self.sl_base = 0.02  # Base stop loss (2%)
+    def init(self):
+        """Initialize indicators that require data."""
+        # Initialize prediction indicators
+        self.price_pred = self.I(lambda: np.array(self.predictions['price'] if self.predictions else [np.nan] * len(self.data.Close)))
+        self.direction_pred = self.I(lambda: np.array(self.predictions['direction'] if self.predictions else [np.nan] * len(self.data.Close)))
 
     def _calculate_rsi_series(self) -> pd.Series:
         """Calculate RSI for the entire series."""
-        close_series = pd.Series(self.close)
+        close_series = pd.Series(self.data.Close)
         delta = close_series.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -61,7 +59,7 @@ class TransformerStrategy(Strategy):
         """Calculate ATR for the entire series."""
         high = pd.Series(self.data.High)
         low = pd.Series(self.data.Low)
-        close = pd.Series(self.close)
+        close = pd.Series(self.data.Close)
         tr1 = high - low
         tr2 = abs(high - close.shift())
         tr3 = abs(low - close.shift())
@@ -213,7 +211,7 @@ class TransformerStrategy(Strategy):
         if self.peak_value > 0:
             self.current_drawdown = (self.peak_value - self.equity) / self.peak_value
 
-    def should_trade(self, confidence: float, current_price: float) -> bool:
+    def should_trade(self) -> bool:
         """
         Determine if trading conditions are met, considering market regime.
         """
@@ -223,12 +221,7 @@ class TransformerStrategy(Strategy):
             return False
 
         # Check for NaN values in critical indicators
-        if (pd.isna(self.sma_fast[-1]) or pd.isna(self.sma_slow[-1]) or
-            pd.isna(self.rsi[-1]) or pd.isna(self.atr[-1])):
-            return False
-
-        # Check confidence threshold
-        if confidence < self.min_confidence:
+        if (pd.isna(self.rsi[-1]) or pd.isna(self.atr[-1])):
             return False
 
         # Check drawdown limit
@@ -239,59 +232,59 @@ class TransformerStrategy(Strategy):
         # Adjust conditions based on regime
         regime = self.regime[-1]
         if regime == 2:  # High volatility
-            if confidence < self.min_confidence * 1.2:  # Require higher confidence
-                return False
+            return False
 
-        # Check technical confirmations
-        trend_aligned = (
-            self.sma_fast[-1] > self.sma_slow[-1] if confidence > 0.5
-            else self.sma_fast[-1] < self.sma_slow[-1]
-        )
-
-        # Check RSI extremes
-        rsi_ok = 20 < self.rsi[-1] < 80
-
-        return trend_aligned and rsi_ok
+        return True
 
     def next(self):
         """
-        Main strategy logic executed on each step.
+        Main strategy logic executed on each bar.
         """
-        # Skip if not enough data for indicators
-        if len(self.data) < 20:
+        # Skip if not enough data
+        if len(self.data.Close) < self.n_lookback:
             return
 
-        # Get current predictions
+        # Update indicators and market regime
+        self._update_indicators()
+
+        # Get current price and ATR
+        current_price = self.data.Close[-1]
+        current_atr = self.I(self._calculate_atr_series)[-1]
+
+        # Check if we should trade
+        if not self.should_trade():
+            return
+
+        # Calculate position size
+        position_size = self.calculate_position_size()
+
+        # Get predictions from indicators
         price_pred = self.price_pred[-1]
         direction_pred = self.direction_pred[-1]
 
-        # Calculate prediction confidence
-        current_price = self.close[-1]
-        price_change = (price_pred - current_price) / current_price
-        confidence = abs(price_change)
-
-        # Check if we should trade
-        if not self.should_trade(confidence, current_price):
+        # Skip if predictions are not available
+        if np.isnan(price_pred) or np.isnan(direction_pred):
             return
 
-        # Calculate position size and risk levels
-        position_size = self.calculate_position_size()  # No arguments needed now
-        tp_price, sl_price = self.calculate_take_profit_stop_loss(
-            current_price,
-            self.atr[-1]
-        )
+        # Calculate take-profit and stop-loss levels
+        tp_price, sl_price = self.calculate_take_profit_stop_loss(current_price, current_atr)
 
-        # Trading decision based on direction prediction
-        if direction_pred > 0.5 and not self.position:
-            # Long position
-            self.buy(size=position_size, sl=sl_price, tp=tp_price)
-        elif direction_pred < 0.5 and not self.position:
-            # Short position
-            self.sell(size=position_size, sl=sl_price, tp=tp_price)
+        # Trading logic based on predictions
+        if not self.position:  # No position
+            if direction_pred > 0.6:  # Strong bullish signal
+                # Buy at market price
+                self.buy(size=position_size, sl=sl_price, tp=tp_price)
+            elif direction_pred < 0.4:  # Strong bearish signal
+                # Sell at market price
+                self.sell(size=position_size, sl=sl_price, tp=tp_price)
+        else:
+            # Update stop-loss and take-profit for existing position
+            if self.position.is_long:
+                self.position.sl = min(self.position.sl or float('inf'), sl_price)
+                self.position.tp = max(self.position.tp or 0, tp_price)
+            else:
+                self.position.sl = max(self.position.sl or 0, sl_price)
+                self.position.tp = min(self.position.tp or float('inf'), tp_price)
 
-        # Update drawdown tracking
+        # Update maximum drawdown
         self.update_drawdown()
-
-        # Close position if maximum drawdown exceeded
-        if self.current_drawdown > self.max_drawdown and self.position:
-            self.position.close()
