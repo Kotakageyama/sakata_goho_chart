@@ -20,7 +20,7 @@ def prepare_sequences(data: pd.DataFrame, sequence_length: int = 60) -> tuple:
     """
     Prepare sequences for the transformer model.
     """
-    features = ['Open', 'High', 'Low', 'Close', 'Volume']
+    features = ['Open', 'High', 'Low', 'Close']  # Removed Volume as it's not in the data
     sequences = []
     targets = []
 
@@ -40,7 +40,7 @@ def main():
 
     # Prepare sequences
     sequence_length = 60
-    num_features = 5  # OHLCV
+    num_features = 4  # OHLC (removed Volume)
     X, y = prepare_sequences(data, sequence_length)
 
     # Initialize evaluator

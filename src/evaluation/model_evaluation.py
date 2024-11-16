@@ -36,7 +36,7 @@ class ModelEvaluator:
         """
         Prepare sequences for the transformer model.
         """
-        features = ['Open', 'High', 'Low', 'Close', 'Volume']
+        features = ['Open', 'High', 'Low', 'Close']  # Removed Volume as it's not in the data
         sequences = []
         targets = []
 
@@ -163,7 +163,7 @@ class ModelEvaluator:
             # Define hyperparameter search space
             params = {
                 'sequence_length': self.sequence_length,
-                'num_features': 5,  # OHLCV
+                'num_features': 4,  # OHLC (removed Volume)
                 'd_model': trial.suggest_int('d_model', 32, 128, step=32),
                 'num_heads': trial.suggest_int('num_heads', 4, 12),
                 'ff_dim': trial.suggest_int('ff_dim', 64, 256, step=64),
