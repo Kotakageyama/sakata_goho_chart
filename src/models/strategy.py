@@ -60,21 +60,27 @@ class TransformerStrategy(Strategy):
 
             # Basic validation
             if np.isnan(direction_confidence):
+                print("Skipping trade: NaN direction confidence")
                 return False
 
-            # Check if confidence meets minimum threshold
-            if direction_confidence < self.min_confidence:
+            # Check if confidence meets minimum threshold (less restrictive)
+            confidence_threshold = 0.45  # Lower threshold for more trades
+            if abs(direction_confidence - 0.5) < (self.min_confidence - confidence_threshold):
+                print(f"Skipping trade: Low confidence {direction_confidence}")
                 return False
 
-            # Check if we have enough equity
-            if self._equity <= 0:
+            # Check if we have enough equity (more permissive)
+            if self._equity < 1000:  # Minimum equity requirement
+                print("Skipping trade: Insufficient equity")
                 return False
 
-            # Check drawdown limit
+            # Check drawdown limit (more permissive)
             current_drawdown = (self.equity_peak - self._equity) / self.equity_peak
-            if current_drawdown > self.max_drawdown:
+            if current_drawdown > self.max_drawdown * 1.5:  # Allow 50% more drawdown
+                print(f"Skipping trade: Exceeded drawdown limit {current_drawdown}")
                 return False
 
+            print(f"Trade conditions met: confidence={direction_confidence}, equity={self._equity}")
             return True
 
         except Exception as e:
@@ -84,9 +90,6 @@ class TransformerStrategy(Strategy):
     def next(self):
         """Execute trading logic."""
         try:
-            if not self.should_trade():
-                return
-
             current_idx = len(self.data) - 1
             current_price = self.data.Close[-1]
 
@@ -95,18 +98,28 @@ class TransformerStrategy(Strategy):
             if self._equity > self.equity_peak:
                 self.equity_peak = self._equity
 
+            # Check trading conditions
+            if not self.should_trade():
+                return
+
             # Calculate position size
             size = self._calculate_position_size(current_price)
+            if size <= 0:
+                print(f"Invalid position size: {size}")
+                return
 
-            # Get trading direction
+            # Get trading direction (more permissive)
             direction_confidence = self.predictions['direction'][current_idx]
-            is_long = direction_confidence > 0.5
+            is_long = direction_confidence >= 0.45  # Lower threshold for long positions
+            is_short = direction_confidence <= 0.55  # Higher threshold for short positions
 
             # Place orders with proper position sizing
             if is_long and not self.position:
+                print(f"Opening LONG position: size={size}, price={current_price}")
                 self.buy(size=size, tp=current_price * (1 + self.take_profit),
                         sl=current_price * (1 - self.stop_loss))
-            elif not is_long and not self.position:
+            elif is_short and not self.position:
+                print(f"Opening SHORT position: size={size}, price={current_price}")
                 self.sell(size=size, tp=current_price * (1 - self.take_profit),
                          sl=current_price * (1 + self.stop_loss))
 
