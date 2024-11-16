@@ -60,14 +60,14 @@ class TransformerStrategy(Strategy):
         if current_drawdown < -self.max_drawdown:
             return False
 
-        return True
-
-    def next(self):
-        """Execute trading logic for the current candle."""
         # Update equity peak
         if self.equity > self.equity_peak:
             self.equity_peak = self.equity
 
+        return True
+
+    def next(self):
+        """Execute trading logic for the current candle."""
         # Skip if trading conditions are not met
         if not self.should_trade():
             return
@@ -92,153 +92,28 @@ class TransformerStrategy(Strategy):
                 tp = current_price * (1 - max(self.take_profit, 3 * atr_multiplier))
                 self.sell(size=size, sl=sl, tp=tp)
 
-    def _adaptive_sl_multiplier(self) -> pd.Series:
-        """
-        Calculate adaptive stop-loss multiplier based on market conditions.
-        Returns a series of multipliers.
-        """
-        # Base multiplier
-        base_sl = 1.5
+    def _calculate_atr(self) -> float:
+        """Calculate ATR for risk management."""
+        high = self.data.High[-self.atr_window:]
+        low = self.data.Low[-self.atr_window:]
+        close = self.data.Close[-self.atr_window:]
 
-        # Adjust based on volatility
-        volatility_factor = pd.Series(self.volatility).fillna(0)
-        volatility_adjustment = 1 + volatility_factor
+        tr1 = high - low
+        tr2 = abs(high - pd.Series(close).shift())
+        tr3 = abs(low - pd.Series(close).shift())
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
 
-        # Adjust based on RSI
-        rsi_series = pd.Series(self.rsi).fillna(50)
-        rsi_factor = np.where(rsi_series > 70, 1.2, np.where(rsi_series < 30, 0.8, 1.0))
+        return tr.mean()
 
-        return pd.Series(base_sl * volatility_adjustment * rsi_factor)
+    def _calculate_position_size(self, current_price: float) -> float:
+        """Calculate position size based on ATR and risk parameters."""
+        atr = self._calculate_atr()
+        risk_per_trade = self.position_size * self.equity
+        price_risk = atr * 2  # Use 2x ATR for initial stop distance
 
-    def calculate_position_size(self) -> float:
-        """
-        Calculate position size based on volatility and current regime.
-        Returns: Position size as a fraction of portfolio value (0 to 1).
-        """
-        # Base position size (as a fraction of portfolio)
-        base_size = 0.2  # Start with 20% of portfolio
+        # Calculate position size based on risk
+        size = risk_per_trade / price_risk
 
-        # Volatility adjustment
-        vol = self.volatility[-1]
-        if vol > 0:
-            # Reduce position size when volatility is high
-            vol_multiplier = 1 / (vol * np.sqrt(252))
-            base_size *= min(vol_multiplier, 2.0)
-
-        # Regime-based adjustment
-        regime = self.regime[-1]
-        regime_multiplier = {
-            0: 1.2,  # Low volatility regime
-            1: 1.0,  # Medium volatility regime
-            2: 0.8,  # High volatility regime
-        }.get(regime, 1.0)
-
-        # Apply regime multiplier and ensure size is between 0.1 and 1.0
-        final_size = min(max(base_size * regime_multiplier, 0.1), 1.0)
-
-        return final_size
-
-    def calculate_take_profit_stop_loss(
-        self,
-        entry_price: float,
-        current_atr: float
-    ) -> Tuple[float, float]:
-        """
-        Calculate adaptive take-profit and stop-loss levels.
-        Uses simple percentage-based calculations with ATR scaling.
-        Ensures proper price ordering for both long and short positions:
-        Long: SL < Entry < TP
-        Short: TP < Entry < SL
-        """
-        # Base percentage moves (1% minimum)
-        base_tp_percent = 0.01
-        base_sl_percent = 0.01
-
-        # Get current multipliers with minimum values
-        tp_mult = max(self.tp_atr_multiplier[-1], 0.5)
-        sl_mult = max(self.sl_atr_multiplier[-1], 0.3)
-
-        # Scale percentages by ATR multiplier and current price level
-        atr_scale = current_atr / entry_price
-        tp_percent = max(base_tp_percent, atr_scale * tp_mult)
-        sl_percent = max(base_sl_percent, atr_scale * sl_mult)
-
-        # Calculate prices ensuring proper order relative to entry price
-        if self.position.is_long:
-            # Long position: SL < Entry < TP
-            tp_price = entry_price * (1 + tp_percent)
-            sl_price = entry_price * (1 - sl_percent)
-        else:
-            # Short position: TP < Entry < SL
-            # For shorts, we need smaller percentages to maintain proper order
-            tp_price = entry_price * (1 - tp_percent * 0.5)  # Closer to entry
-            sl_price = entry_price * (1 + sl_percent * 0.5)  # Closer to entry
-
-        # Final validation
-        if self.position.is_long:
-            assert sl_price < entry_price < tp_price, "Invalid price ordering for long position"
-        else:
-            assert tp_price < entry_price < sl_price, "Invalid price ordering for short position"
-
-        return tp_price, sl_price
-
-    def update_drawdown(self):
-        """Update drawdown tracking."""
-        self.peak_value = max(self.peak_value, self.equity)
-        if self.peak_value > 0:
-            self.current_drawdown = (self.peak_value - self.equity) / self.peak_value
-
-    def should_trade(self) -> bool:
-        """
-        Determine if trading conditions are met, considering market regime.
-        """
-        # Check for initialization period
-        warmup_period = 20  # Maximum lookback period for indicators
-        if len(self.data.Close) < warmup_period:
-            return False
-
-        # Check for NaN values in critical indicators
-        if (pd.isna(self.rsi[-1]) or pd.isna(self.atr[-1])):
-            return False
-
-        # Check drawdown limit
-        self.update_drawdown()
-        if self.current_drawdown > self.max_drawdown:
-            return False
-
-        # Adjust conditions based on regime
-        regime = self.regime[-1]
-        if regime == 2:  # High volatility
-            return False
-
-        return True
-
-    def next(self):
-        """Execute trading logic for the current candle."""
-        # Update equity peak
-        if self.equity > self.equity_peak:
-            self.equity_peak = self.equity
-
-        # Skip if trading conditions are not met
-        if not self.should_trade():
-            return
-
-        # Calculate position size based on ATR
-        risk_adjusted_size = self.position_size * (1 / (self.atr[-1] / self.data.Close[-1]))
-        size = max(0.1, min(1.0, risk_adjusted_size))  # Limit position size between 10% and 100%
-
-        # Calculate take-profit and stop-loss levels
-        current_price = self.data.Close[-1]
-        atr_multiplier = self.atr[-1] / current_price
-
-        if self.direction_predictions[-1] > 0.5:  # Bullish signal
-            if not self.position:  # Enter long position
-                sl = current_price * (1 - max(self.stop_loss, 2 * atr_multiplier))
-                tp = current_price * (1 + max(self.take_profit, 3 * atr_multiplier))
-                self.buy(size=size, sl=sl, tp=tp)
-
-        else:  # Bearish signal
-            if not self.position:  # Enter short position
-                sl = current_price * (1 + max(self.stop_loss, 2 * atr_multiplier))
-                tp = current_price * (1 - max(self.take_profit, 3 * atr_multiplier))
-                self.sell(size=size, sl=sl, tp=tp)
+        # Limit position size
+        max_size = self.equity * 0.5 / current_price  # Maximum 50% of equity
+        return min(size, max_size)
