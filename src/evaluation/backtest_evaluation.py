@@ -7,13 +7,15 @@ from backtesting import Backtest
 from typing import Dict, List, Tuple
 import optuna
 from src.models.strategy import TransformerStrategy
-from src.data.data_loader import load_crypto_data
+from src.data.data_loader import CryptoDataLoader
 from sklearn.model_selection import TimeSeriesSplit
 
 class BacktestEvaluator:
     def __init__(self, data_path: str):
         """Initialize the backtest evaluator."""
-        self.data = load_crypto_data(data_path)
+        self.data_loader = CryptoDataLoader()
+        self.data = self.data_loader.load_data(data_path)
+        self.data = self.data_loader.add_technical_indicators(self.data)
         self.predictions = None
         self.results = {}
 
@@ -73,7 +75,11 @@ class BacktestEvaluator:
             params = {
                 'min_confidence': trial.suggest_float('min_confidence', 0.5, 0.8),
                 'position_size': trial.suggest_float('position_size', 0.1, 0.5),
-                'max_drawdown': trial.suggest_float('max_drawdown', 0.1, 0.3)
+                'max_drawdown': trial.suggest_float('max_drawdown', 0.1, 0.3),
+                'rsi_window': trial.suggest_int('rsi_window', 10, 30),
+                'atr_window': trial.suggest_int('atr_window', 10, 30),
+                'take_profit': trial.suggest_float('take_profit', 0.01, 0.05),
+                'stop_loss': trial.suggest_float('stop_loss', 0.01, 0.05)
             }
 
             # Run backtest with parameters
@@ -87,17 +93,18 @@ class BacktestEvaluator:
 
             def set_strategy_params(strategy):
                 strategy.predictions = self.predictions
-                strategy.min_confidence = params['min_confidence']
-                strategy.position_size = params['position_size']
-                strategy.max_drawdown = params['max_drawdown']
+                for key, value in params.items():
+                    setattr(strategy, key, value)
 
             stats = bt.run(set_strategy_params)
 
-            # Calculate objective value (Sharpe ratio)
+            # Calculate objective value (combination of metrics)
             returns = pd.Series(stats._equity_curve['Equity']).pct_change()
             sharpe_ratio = self.calculate_sharpe_ratio(returns.dropna())
+            max_drawdown = self.calculate_max_drawdown(pd.Series(stats._equity_curve['Equity']))
 
-            return sharpe_ratio
+            # Objective: maximize Sharpe ratio while minimizing drawdown
+            return sharpe_ratio * (1 + abs(max_drawdown))
 
         # Create and run optimization study
         study = optuna.create_study(direction='maximize')
@@ -192,7 +199,7 @@ def main():
     # Initialize evaluator with data
     evaluator = BacktestEvaluator('data/ETHUSD_2Year_2022-11-15_2024-11-15.csv')
 
-    # Set dummy predictions (replace with actual model predictions)
+    # Generate dummy predictions for testing (replace with actual model predictions)
     n_samples = len(evaluator.data)
     evaluator.set_predictions(
         price_pred=np.random.randn(n_samples),
