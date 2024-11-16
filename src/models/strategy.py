@@ -166,18 +166,26 @@ class TransformerStrategy(Strategy):
     def calculate_take_profit_stop_loss(self, entry_price: float, current_atr: float) -> Tuple[float, float]:
         """
         Calculate adaptive take-profit and stop-loss levels.
+        Ensures valid price levels that are greater than 0.
         """
         # Get current multipliers
-        tp_mult = self.tp_atr_multiplier[-1]
-        sl_mult = self.sl_atr_multiplier[-1]
+        tp_mult = max(self.tp_atr_multiplier[-1], 0.5)  # Minimum 0.5x ATR
+        sl_mult = max(self.sl_atr_multiplier[-1], 0.3)  # Minimum 0.3x ATR
 
-        # Calculate levels based on ATR
+        # Calculate price movement based on ATR
+        price_movement = current_atr * entry_price
+
+        # Calculate levels based on ATR and ensure they're valid
         if self.position.is_long:
-            tp_price = entry_price * (1 + tp_mult * current_atr)
-            sl_price = entry_price * (1 - sl_mult * current_atr)
+            tp_price = entry_price * (1 + tp_mult * (price_movement / entry_price))
+            sl_price = entry_price * (1 - sl_mult * (price_movement / entry_price))
         else:  # Short position
-            tp_price = entry_price * (1 - tp_mult * current_atr)
-            sl_price = entry_price * (1 + sl_mult * current_atr)
+            tp_price = entry_price * (1 - tp_mult * (price_movement / entry_price))
+            sl_price = entry_price * (1 + sl_mult * (price_movement / entry_price))
+
+        # Ensure prices are valid (greater than 0 and not too close to entry)
+        tp_price = max(tp_price, entry_price * 1.001) if self.position.is_long else min(tp_price, entry_price * 0.999)
+        sl_price = min(sl_price, entry_price * 0.999) if self.position.is_long else max(sl_price, entry_price * 1.001)
 
         return tp_price, sl_price
 
