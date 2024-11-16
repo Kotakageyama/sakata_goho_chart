@@ -224,7 +224,7 @@ class TransformerStrategy(Strategy):
             return
 
         # Calculate position size and risk levels
-        position_size = self.calculate_position_size(confidence, self.atr[-1])
+        position_size = self.calculate_position_size()  # No arguments needed now
         tp_price, sl_price = self.calculate_take_profit_stop_loss(
             current_price,
             self.atr[-1]
