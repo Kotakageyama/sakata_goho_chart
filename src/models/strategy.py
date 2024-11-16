@@ -34,8 +34,11 @@ class TransformerStrategy(Strategy):
         # Strategy parameters
         self.min_confidence = 0.6
         self.max_drawdown = 0.15
-        self.current_drawdown = 0.0
         self.position_size = 1.0
+
+        # Performance tracking
+        self.peak_value = self.equity
+        self.current_drawdown = 0.0
 
         # Risk management
         self.tp_base = 0.03  # Base take profit (3%)
@@ -116,37 +119,31 @@ class TransformerStrategy(Strategy):
             return base_sl * 1.5
         return base_sl
 
-    def calculate_position_size(self, confidence: float, current_atr: float) -> float:
+    def calculate_position_size(self) -> float:
         """
-        Calculate position size based on prediction confidence, volatility,
-        and portfolio optimization constraints.
+        Calculate position size based on volatility and current regime.
+        Returns: Position size as a fraction of portfolio value.
         """
-        # Scale confidence to [0, 1]
-        scaled_confidence = max(0, min(1, (confidence - self.min_confidence) / (1 - self.min_confidence)))
+        # Base position size
+        base_size = self.position_size
 
-        # Adjust for volatility and regime
+        # Adjust for volatility
+        if self.volatility[-1] > 0:
+            vol_multiplier = 1 / (self.volatility[-1] * np.sqrt(252))  # Annualized volatility
+            base_size *= min(vol_multiplier, 2.0)  # Cap at 2x leverage
+
+        # Adjust for market regime
         regime = self.regime[-1]
-        regime_factor = 1.0
-        if regime == 0:
-            regime_factor = 1.2  # Increase size in low vol
-        elif regime == 2:
-            regime_factor = 0.8  # Decrease size in high vol
+        if regime == 0:  # Low volatility
+            regime_multiplier = 1.2
+        elif regime == 2:  # High volatility
+            regime_multiplier = 0.8
+        else:  # Medium volatility
+            regime_multiplier = 1.0
 
-        volatility_factor = 1 / (1 + current_atr * self.volatility_multiplier)
-
-        # Calculate position size with portfolio constraints
-        position_size = (
-            self.base_position_size *
-            scaled_confidence *
-            volatility_factor *
-            regime_factor
-        )
-
-        # Apply leverage and volatility targeting
-        target_exposure = self.equity * self.target_volatility / (current_atr * 252**0.5)
-        max_size = min(self.max_position_size, target_exposure / self.equity)
-
-        return min(position_size, max_size)
+        # Apply regime adjustment and ensure within limits
+        position_size = base_size * regime_multiplier
+        return max(min(position_size, 2.0), 0.1)
 
     def calculate_take_profit_stop_loss(self, entry_price: float, current_atr: float) -> Tuple[float, float]:
         """
@@ -160,9 +157,10 @@ class TransformerStrategy(Strategy):
         return take_profit, stop_loss
 
     def update_drawdown(self):
-        """Update drawdown calculations."""
+        """Update drawdown tracking."""
         self.peak_value = max(self.peak_value, self.equity)
-        self.current_drawdown = (self.peak_value - self.equity) / self.peak_value
+        if self.peak_value > 0:
+            self.current_drawdown = (self.peak_value - self.equity) / self.peak_value
 
     def should_trade(self, confidence: float, current_price: float) -> bool:
         """
@@ -226,10 +224,9 @@ class TransformerStrategy(Strategy):
             return
 
         # Calculate position size and risk levels
-        position_size = self.calculate_position_size()
+        position_size = self.calculate_position_size(confidence, self.atr[-1])
         tp_price, sl_price = self.calculate_take_profit_stop_loss(
             current_price,
-            price_pred,
             self.atr[-1]
         )
 
