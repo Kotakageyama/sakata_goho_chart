@@ -99,29 +99,41 @@ class TransformerStrategy(Strategy):
 
         return regimes
 
-    def _adaptive_tp_multiplier(self) -> float:
+    def _adaptive_tp_multiplier(self) -> pd.Series:
         """
-        Adjust take-profit multiplier based on market regime.
+        Calculate adaptive take-profit multiplier based on market conditions.
+        Returns a series of multipliers.
         """
-        regime = self.regime[-1]
-        base_tp = 3.0
-        if regime == 0:  # Low volatility
-            return base_tp * 1.5
-        elif regime == 2:  # High volatility
-            return base_tp * 0.75
-        return base_tp
+        # Base multiplier
+        base_tp = 2.0
 
-    def _adaptive_sl_multiplier(self) -> float:
+        # Adjust based on volatility
+        volatility_factor = pd.Series(self.volatility).fillna(0)
+        volatility_adjustment = 1 + volatility_factor
+
+        # Adjust based on RSI
+        rsi_series = pd.Series(self.rsi).fillna(50)
+        rsi_factor = np.where(rsi_series > 70, 0.8, np.where(rsi_series < 30, 1.2, 1.0))
+
+        return pd.Series(base_tp * volatility_adjustment * rsi_factor)
+
+    def _adaptive_sl_multiplier(self) -> pd.Series:
         """
-        Adjust stop-loss multiplier based on market regime.
+        Calculate adaptive stop-loss multiplier based on market conditions.
+        Returns a series of multipliers.
         """
-        regime = self.regime[-1]
+        # Base multiplier
         base_sl = 1.5
-        if regime == 0:  # Low volatility
-            return base_sl * 0.75
-        elif regime == 2:  # High volatility
-            return base_sl * 1.5
-        return base_sl
+
+        # Adjust based on volatility
+        volatility_factor = pd.Series(self.volatility).fillna(0)
+        volatility_adjustment = 1 + volatility_factor
+
+        # Adjust based on RSI
+        rsi_series = pd.Series(self.rsi).fillna(50)
+        rsi_factor = np.where(rsi_series > 70, 1.2, np.where(rsi_series < 30, 0.8, 1.0))
+
+        return pd.Series(base_sl * volatility_adjustment * rsi_factor)
 
     def calculate_position_size(self) -> float:
         """
