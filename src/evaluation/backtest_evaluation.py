@@ -21,10 +21,13 @@ class BacktestEvaluator:
 
     def _validate_data(self):
         """Validate the input data."""
-        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        required_columns = ['Open', 'High', 'Low', 'Close']
         missing_columns = [col for col in required_columns if col not in self.data.columns]
         if missing_columns:
             raise ValueError(f"Missing required columns: {missing_columns}")
+        # Add Volume column if not present (optional)
+        if 'Volume' not in self.data.columns:
+            self.data['Volume'] = 0  # Use zero as placeholder for missing volume data
 
     def set_predictions(self, predictions: Dict[str, np.ndarray]):
         """Set predictions for backtesting."""
