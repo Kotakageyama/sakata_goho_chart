@@ -15,70 +15,82 @@ class TransformerStrategy(Strategy):
     and market regime detection.
     """
     def init(self):
-        # Price predictions and direction signals
-        self.price_predictions = self.I(lambda: self.data.price_pred)
-        self.direction_predictions = self.I(lambda: self.data.direction_pred)
+        """Initialize strategy parameters and indicators."""
+        # Load price data and predictions
+        self.close = self.data.Close
+        self.price_pred = self.data.price_pred
+        self.direction_pred = self.data.direction_pred
 
-        # Technical indicators for confirmation
-        self.sma_fast = self.I(lambda: self.data.SMA_10)
-        self.sma_slow = self.I(lambda: self.data.SMA_20)
-        self.rsi = self.I(lambda: self.data.RSI)
-        self.atr = self.I(lambda: self.data.ATR)
-        self.volatility = self.I(lambda: self.data.volatility)
-        self.volume = self.I(lambda: self.data.Volume)
+        # Technical indicators
+        self.sma_fast = self.I(lambda: pd.Series(self.close).rolling(window=10).mean())
+        self.sma_slow = self.I(lambda: pd.Series(self.close).rolling(window=20).mean())
+        self.rsi = self.I(lambda: self._calculate_rsi_series())
+        self.atr = self.I(lambda: self._calculate_atr_series())
+        self.volatility = self.I(lambda: pd.Series(self.close).pct_change().rolling(window=20).std())
 
         # Market regime detection
         self.regime = self.I(self._detect_market_regime)
 
-        # Transaction costs
-        self.commission = 0.001  # 0.1% per trade
-        self.slippage = 0.0005   # 0.05% slippage
-
-        # Volatility-based position sizing and risk management
-        self.volatility_multiplier = 1.5
-        self.base_position_size = 0.1
-        self.max_position_size = 0.5
-
-        # Dynamic take-profit and stop-loss based on ATR and regime
-        self.tp_atr_multiplier = self.I(self._adaptive_tp_multiplier)
-        self.sl_atr_multiplier = self.I(self._adaptive_sl_multiplier)
-
-        # Minimum prediction confidence threshold
+        # Strategy parameters
         self.min_confidence = 0.6
-
-        # Maximum allowed drawdown
         self.max_drawdown = 0.15
-
-        # Portfolio optimization parameters
-        self.max_leverage = 2.0
-        self.target_volatility = 0.20  # 20% annual volatility target
-
-        # Track portfolio performance
-        self.peak_value = self.equity
         self.current_drawdown = 0.0
+        self.position_size = 1.0
 
-    def _detect_market_regime(self) -> int:
+        # Risk management
+        self.tp_base = 0.03  # Base take profit (3%)
+        self.sl_base = 0.02  # Base stop loss (2%)
+
+    def _calculate_rsi_series(self) -> pd.Series:
+        """Calculate RSI for the entire series."""
+        close_series = pd.Series(self.close)
+        delta = close_series.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        return pd.Series(100 - (100 / (1 + rs)))
+
+    def _calculate_atr_series(self) -> pd.Series:
+        """Calculate ATR for the entire series."""
+        high = pd.Series(self.data.High)
+        low = pd.Series(self.data.Low)
+        close = pd.Series(self.close)
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        return tr.rolling(window=14).mean()
+
+    def _detect_market_regime(self) -> np.ndarray:
         """
-        Detect market regime using volatility and volume.
-        Returns: 0 (low vol), 1 (medium vol), 2 (high vol)
+        Detect market regime using volatility.
+        Returns: Array of regime values (0: low vol, 1: medium vol, 2: high vol)
         """
-        # Default to medium volatility regime during warmup period
-        if len(self.volatility) < 20 or pd.isna(self.volatility[-1]):
-            return 1
+        # Initialize array with medium volatility regime
+        regimes = np.ones(len(self.data.Close))
 
-        # Get last 20 periods of volatility data
-        vol = np.array([v for v in self.volatility[-20:] if not pd.isna(v)])
-        if len(vol) == 0:
-            return 1  # Default to medium volatility if no valid data
+        # Wait for enough data
+        if len(self.data.Close) < 20:
+            return regimes
 
-        vol_mean = np.mean(vol)
-        vol_std = np.std(vol) if len(vol) > 1 else vol_mean
+        # Calculate rolling volatility statistics
+        for i in range(20, len(self.data.Close)):
+            # Get volatility window
+            vol_window = [v for v in self.volatility[i-20:i] if not pd.isna(v)]
 
-        if vol_mean < vol_std:
-            return 0  # Low volatility regime
-        elif vol_mean > 2 * vol_std:
-            return 2  # High volatility regime
-        return 1  # Medium volatility regime
+            if len(vol_window) < 2:
+                continue
+
+            vol = np.array(vol_window)
+            vol_mean = np.mean(vol)
+            vol_std = np.std(vol)
+
+            if vol_mean < vol_std:
+                regimes[i] = 0  # Low volatility regime
+            elif vol_mean > 2 * vol_std:
+                regimes[i] = 2  # High volatility regime
+
+        return regimes
 
     def _adaptive_tp_multiplier(self) -> float:
         """
