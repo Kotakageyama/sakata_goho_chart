@@ -214,54 +214,31 @@ class TransformerStrategy(Strategy):
         return True
 
     def next(self):
-        """
-        Main strategy logic executed on each bar.
-        """
-        # Skip if not enough data
-        if len(self.data.Close) < self.n_lookback:
-            return
+        """Execute trading logic for the current candle."""
+        # Update equity peak
+        if self.equity > self.equity_peak:
+            self.equity_peak = self.equity
 
-        # Update indicators and market regime
-        self._update_indicators()
-
-        # Get current price and ATR
-        current_price = self.data.Close[-1]
-        current_atr = self.I(self._calculate_atr_series)[-1]
-
-        # Check if we should trade
+        # Skip if trading conditions are not met
         if not self.should_trade():
             return
 
-        # Calculate position size
-        position_size = self.calculate_position_size()
-
-        # Get predictions from indicators
-        price_pred = self.price_pred[-1]
-        direction_pred = self.direction_pred[-1]
-
-        # Skip if predictions are not available
-        if np.isnan(price_pred) or np.isnan(direction_pred):
-            return
+        # Calculate position size based on ATR
+        risk_adjusted_size = self.position_size * (1 / (self.atr[-1] / self.data.Close[-1]))
+        size = max(0.1, min(1.0, risk_adjusted_size))  # Limit position size between 10% and 100%
 
         # Calculate take-profit and stop-loss levels
-        tp_price, sl_price = self.calculate_take_profit_stop_loss(current_price, current_atr)
+        current_price = self.data.Close[-1]
+        atr_multiplier = self.atr[-1] / current_price
 
-        # Trading logic based on predictions
-        if not self.position:  # No position
-            if direction_pred > 0.6:  # Strong bullish signal
-                # Buy at market price
-                self.buy(size=position_size, sl=sl_price, tp=tp_price)
-            elif direction_pred < 0.4:  # Strong bearish signal
-                # Sell at market price
-                self.sell(size=position_size, sl=sl_price, tp=tp_price)
-        else:
-            # Update stop-loss and take-profit for existing position
-            if self.position.is_long:
-                self.position.sl = min(self.position.sl or float('inf'), sl_price)
-                self.position.tp = max(self.position.tp or 0, tp_price)
-            else:
-                self.position.sl = max(self.position.sl or 0, sl_price)
-                self.position.tp = min(self.position.tp or float('inf'), tp_price)
+        if self.direction_predictions[-1] > 0.5:  # Bullish signal
+            if not self.position:  # Enter long position
+                sl = current_price * (1 - max(self.stop_loss, 2 * atr_multiplier))
+                tp = current_price * (1 + max(self.take_profit, 3 * atr_multiplier))
+                self.buy(size=size, sl=sl, tp=tp)
 
-        # Update maximum drawdown
-        self.update_drawdown()
+        else:  # Bearish signal
+            if not self.position:  # Enter short position
+                sl = current_price * (1 + max(self.stop_loss, 2 * atr_multiplier))
+                tp = current_price * (1 - max(self.take_profit, 3 * atr_multiplier))
+                self.sell(size=size, sl=sl, tp=tp)
