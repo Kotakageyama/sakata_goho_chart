@@ -33,10 +33,7 @@ class BacktestEvaluator:
         """Set predictions for backtesting."""
         if len(predictions['price']) != len(self.data) or len(predictions['direction']) != len(self.data):
             raise ValueError("Prediction arrays must match data length")
-        self.predictions = {
-            'price': pd.Series(predictions['price'], index=self.data.index),
-            'direction': pd.Series(predictions['direction'], index=self.data.index)
-        }
+        self.predictions = predictions
 
     def _run_backtest(self, **kwargs) -> Dict:
         """Run a single backtest with given parameters."""
@@ -44,27 +41,42 @@ class BacktestEvaluator:
             raise ValueError("Predictions must be set before running backtest")
 
         try:
-            # Create strategy instance with parameters
-            strategy_class = type('DynamicStrategy', (TransformerStrategy,), {
+            # Create strategy class with parameters
+            strategy_params = {
                 'predictions': self.predictions,
                 **kwargs
-            })
+            }
 
             # Run backtest
-            bt = Backtest(self.data, strategy_class,
-                         cash=100000, commission=.002,
-                         exclusive_orders=True)
+            bt = Backtest(
+                self.data,
+                TransformerStrategy,
+                cash=100000,
+                commission=.002,
+                exclusive_orders=True
+            )
 
-            stats = bt.run()
+            # Run optimization with strategy parameters
+            stats = bt.run(**strategy_params)
 
-            # Extract key metrics
+            # Extract metrics safely
+            try:
+                sharpe = float(stats['Sharpe Ratio'])
+                max_dd = float(stats['Max. Drawdown'])
+                total_return = float(stats['Return [%]'])
+                win_rate = float(stats['Win Rate [%]'])
+            except (KeyError, TypeError, ValueError) as e:
+                print(f"Error extracting metrics: {str(e)}")
+                sharpe, max_dd, total_return, win_rate = 0.0, 1.0, -1.0, 0.0
+
             return {
-                'sharpe_ratio': float(stats['Sharpe Ratio']) if not np.isnan(stats['Sharpe Ratio']) else 0.0,
-                'max_drawdown': float(stats['Max. Drawdown']) if not np.isnan(stats['Max. Drawdown']) else 1.0,
-                'total_return': float(stats['Return [%]']) / 100 if not np.isnan(stats['Return [%]']) else -1.0,
-                'win_rate': float(stats['Win Rate [%]']) / 100 if not np.isnan(stats['Win Rate [%]']) else 0.0,
-                'equity_curve': pd.Series(stats._equity_curve['Equity'], index=self.data.index)
+                'sharpe_ratio': 0.0 if np.isnan(sharpe) else sharpe,
+                'max_drawdown': 1.0 if np.isnan(max_dd) else max_dd / 100,
+                'total_return': -1.0 if np.isnan(total_return) else total_return / 100,
+                'win_rate': 0.0 if np.isnan(win_rate) else win_rate / 100,
+                'equity_curve': pd.Series(stats._equity_curve['Equity'])
             }
+
         except Exception as e:
             print(f"Backtest failed: {str(e)}")
             return {
@@ -113,13 +125,13 @@ class BacktestEvaluator:
         segment_size = len(self.data) // n_splits
         for i in range(n_splits):
             start_idx = i * segment_size
-            end_idx = (i + 1) * segment_size
+            end_idx = (i + 1) * segment_size if i < n_splits - 1 else len(self.data)
 
             # Create segment data and predictions
             segment_data = self.data.iloc[start_idx:end_idx].copy()
             segment_predictions = {
-                'price': self.predictions['price'].iloc[start_idx:end_idx],
-                'direction': self.predictions['direction'].iloc[start_idx:end_idx]
+                'price': self.predictions['price'][start_idx:end_idx],
+                'direction': self.predictions['direction'][start_idx:end_idx]
             }
 
             # Create temporary evaluator for segment
