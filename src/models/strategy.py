@@ -31,6 +31,10 @@ class TransformerStrategy(Strategy):
         # Market regime detection
         self.regime = self.I(self._detect_market_regime)
 
+        # Adaptive multipliers for take profit and stop loss
+        self.tp_atr_multiplier = self.I(self._adaptive_tp_multiplier)
+        self.sl_atr_multiplier = self.I(self._adaptive_sl_multiplier)
+
         # Strategy parameters
         self.min_confidence = 0.6
         self.max_drawdown = 0.15
@@ -147,14 +151,21 @@ class TransformerStrategy(Strategy):
 
     def calculate_take_profit_stop_loss(self, entry_price: float, current_atr: float) -> Tuple[float, float]:
         """
-        Calculate dynamic take-profit and stop-loss levels based on ATR and regime.
+        Calculate adaptive take-profit and stop-loss levels.
         """
+        # Get current multipliers
         tp_mult = self.tp_atr_multiplier[-1]
         sl_mult = self.sl_atr_multiplier[-1]
 
-        take_profit = entry_price * (1 + current_atr * tp_mult)
-        stop_loss = entry_price * (1 - current_atr * sl_mult)
-        return take_profit, stop_loss
+        # Calculate levels based on ATR
+        if self.position.is_long:
+            tp_price = entry_price * (1 + tp_mult * current_atr)
+            sl_price = entry_price * (1 - sl_mult * current_atr)
+        else:  # Short position
+            tp_price = entry_price * (1 - tp_mult * current_atr)
+            sl_price = entry_price * (1 + sl_mult * current_atr)
+
+        return tp_price, sl_price
 
     def update_drawdown(self):
         """Update drawdown tracking."""
