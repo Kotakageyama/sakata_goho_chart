@@ -50,26 +50,37 @@ class BacktestEvaluator:
             # Set initial cash/equity
             cash = 100000  # Start with 100k initial capital
 
-            # Run backtest with proper initialization
+            # Run backtest with proper initialization and trade tracking
             bt = Backtest(
                 self.data,
                 TransformerStrategy,
                 cash=cash,
                 commission=.002,
                 exclusive_orders=True,
-                trade_on_close=False,
+                trade_on_close=True,  # Changed to trade on close
+                hedging=False,  # Ensure no hedging
             )
 
-            # Run optimization
+            # Run optimization with trade tracking
             stats = bt.run(**strategy_params)
 
-            # Extract key metrics
+            # Print detailed trade statistics
+            print("\nBacktest Statistics:")
+            print(f"Number of trades: {stats['# Trades']}")
+            print(f"Win Rate: {stats['Win Rate [%]']}%")
+            print(f"Profit Factor: {stats['Profit Factor']}")
+            print(f"Expected Payoff: {stats['Expectancy [%]']}%")
+            print(f"Max Drawdown: {stats['Max. Drawdown [%]']}%")
+            print(f"Sharpe Ratio: {stats['Sharpe Ratio']}")
+            print(f"Final Portfolio Value: {stats['Equity Final [$]']}")
+
+            # Extract key metrics with proper scaling
             metrics = {
                 'sharpe_ratio': float(stats['Sharpe Ratio']) if 'Sharpe Ratio' in stats else 0.0,
-                'max_drawdown': float(stats['Max. Drawdown']) if 'Max. Drawdown' in stats else 1.0,
-                'total_return': float(stats['Return [%]']) / 100 if 'Return [%]' in stats else -1.0,
+                'max_drawdown': float(stats['Max. Drawdown [%]']) / 100 if 'Max. Drawdown [%]' in stats else 1.0,
+                'total_return': (float(stats['Return [%]']) / 100) if 'Return [%]' in stats else -1.0,
                 'win_rate': float(stats['Win Rate [%]']) / 100 if 'Win Rate [%]' in stats else 0.0,
-                'equity_curve': stats._equity_curve['Equity'] if hasattr(stats, '_equity_curve') else pd.Series(index=self.data.index)
+                'equity_curve': stats['_equity_curve']['Equity'] if '_equity_curve' in stats else pd.Series(index=self.data.index, data=cash)
             }
 
             return metrics
@@ -82,7 +93,7 @@ class BacktestEvaluator:
                 'max_drawdown': 1.0,
                 'total_return': -1.0,
                 'win_rate': 0.0,
-                'equity_curve': pd.Series(index=self.data.index)
+                'equity_curve': pd.Series(index=self.data.index, data=cash)
             }
 
     def optimize_hyperparameters(self, n_trials: int = 30) -> Dict:

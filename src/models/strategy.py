@@ -110,21 +110,31 @@ class TransformerStrategy(Strategy):
 
             # Get trading direction (more permissive)
             direction_confidence = self.predictions['direction'][current_idx]
-            is_long = direction_confidence >= 0.45  # Lower threshold for long positions
-            is_short = direction_confidence <= 0.55  # Higher threshold for short positions
 
-            # Place orders with proper position sizing
-            if is_long and not self.position:
+            # Close existing positions if confidence changes
+            if self.position:
+                if (self.position.is_long and direction_confidence < 0.45) or \
+                   (self.position.is_short and direction_confidence > 0.55):
+                    self.position.close()
+                return  # Skip opening new position this candle
+
+            # Open new positions
+            if direction_confidence >= 0.55:  # Strong long signal
                 print(f"Opening LONG position: size={size}, price={current_price}")
-                self.buy(size=size, tp=current_price * (1 + self.take_profit),
-                        sl=current_price * (1 - self.stop_loss))
-            elif is_short and not self.position:
+                sl_price = current_price * (1 - self.stop_loss)
+                tp_price = current_price * (1 + self.take_profit)
+                self.buy(size=size, sl=sl_price, tp=tp_price)
+
+            elif direction_confidence <= 0.45:  # Strong short signal
                 print(f"Opening SHORT position: size={size}, price={current_price}")
-                self.sell(size=size, tp=current_price * (1 - self.take_profit),
-                         sl=current_price * (1 + self.stop_loss))
+                sl_price = current_price * (1 + self.stop_loss)
+                tp_price = current_price * (1 - self.take_profit)
+                self.sell(size=size, sl=sl_price, tp=tp_price)
 
         except Exception as e:
             print(f"Error in next: {str(e)}")
+            if self.position:  # Close position on error
+                self.position.close()
 
     def _calculate_position_size(self, current_price: float) -> float:
         """Calculate position size based on ATR and risk parameters."""
@@ -139,19 +149,23 @@ class TransformerStrategy(Strategy):
             # Calculate risk amount (fixed percentage of equity)
             risk_amount = self._equity * self.position_size
 
-            # Ensure minimum position size
-            min_position = max(0.01, self._equity * 0.01)  # At least 1% of equity
-
-            # Calculate size based on ATR and stop loss
+            # Calculate stop loss distance
             stop_distance = max(atr * 2, current_price * self.stop_loss)
-            size = risk_amount / stop_distance
+
+            # Calculate position size in units
+            size = (risk_amount / stop_distance)
+
+            # Ensure minimum position size (0.1 units)
+            min_position = 0.1
+
+            # Maximum position size (25% of equity in value)
+            max_position = (self._equity * 0.25) / current_price
 
             # Ensure size is within valid range
-            max_position = self._equity / current_price  # Maximum 100% of equity
             size = max(min_position, min(size, max_position))
 
             return float(size)  # Ensure we return a float
 
         except Exception as e:
             print(f"Error in position sizing: {str(e)}")
-            return 0.01  # Return minimum size on error
+            return 0.1  # Return minimum size on error
