@@ -123,7 +123,9 @@ class ModelEvaluator:
             )
 
             # Generate predictions
-            predictions = model.predict(X_val)[0]  # Get price predictions
+            predictions = model.predict(X_val)
+            price_predictions = predictions['price_output']
+            direction_predictions = predictions['direction_output']
 
             # Initialize and run strategy
             strategy = strategy_class(
@@ -141,7 +143,7 @@ class ModelEvaluator:
             # Calculate metrics
             metrics = self.calculate_metrics(
                 y_val,
-                predictions,
+                price_predictions,
                 result._equity_curve['Equity'].values,
                 result._equity_curve['Returns'].values
             )
