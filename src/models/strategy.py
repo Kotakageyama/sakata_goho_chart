@@ -206,52 +206,44 @@ class TransformerStrategy(Strategy):
 
     def next(self):
         """
-        Trading logic implementation with transaction cost consideration
-        and regime-based adjustments.
+        Main strategy logic executed on each step.
         """
-        # Get current predictions and indicators
-        price_pred = self.price_predictions[-1]
-        direction_conf = self.direction_predictions[-1]
-        current_price = self.data.Close[-1]
-        current_atr = self.atr[-1]
+        # Skip if not enough data for indicators
+        if len(self.data) < 20:
+            return
 
-        # Calculate expected return (accounting for costs)
-        transaction_costs = self.commission + self.slippage
-        expected_return = (price_pred - current_price) / current_price
-        net_expected_return = expected_return - 2 * transaction_costs  # Round trip costs
+        # Get current predictions
+        price_pred = self.price_pred[-1]
+        direction_pred = self.direction_pred[-1]
 
-        # Determine trading direction
-        if not self.position:  # No position
-            if self.should_trade(direction_conf, current_price):
-                # Calculate position size
-                size = self.calculate_position_size(direction_conf, current_atr)
+        # Calculate prediction confidence
+        current_price = self.close[-1]
+        price_change = (price_pred - current_price) / current_price
+        confidence = abs(price_change)
 
-                if net_expected_return > 0 and direction_conf > self.min_confidence:
-                    # Long entry
-                    take_profit, stop_loss = self.calculate_take_profit_stop_loss(current_price, current_atr)
-                    self.buy(size=size, sl=stop_loss, tp=take_profit)
+        # Check if we should trade
+        if not self.should_trade(confidence, current_price):
+            return
 
-                elif net_expected_return < 0 and (1 - direction_conf) > self.min_confidence:
-                    # Short entry
-                    take_profit, stop_loss = self.calculate_take_profit_stop_loss(current_price, current_atr)
-                    self.sell(size=size, sl=stop_loss, tp=take_profit)
+        # Calculate position size and risk levels
+        position_size = self.calculate_position_size()
+        tp_price, sl_price = self.calculate_take_profit_stop_loss(
+            current_price,
+            price_pred,
+            self.atr[-1]
+        )
 
-        else:  # Position exists
-            # Update stop-loss and take-profit based on current ATR and regime
-            if self.position.is_long:
-                new_tp, new_sl = self.calculate_take_profit_stop_loss(self.position.entry_price, current_atr)
-                if new_sl > self.position.sl:  # Trail stop-loss
-                    self.position.sl = new_sl
-            else:
-                new_tp, new_sl = self.calculate_take_profit_stop_loss(self.position.entry_price, current_atr)
-                if new_sl < self.position.sl:  # Trail stop-loss for shorts
-                    self.position.sl = new_sl
+        # Trading decision based on direction prediction
+        if direction_pred > 0.5 and not self.position:
+            # Long position
+            self.buy(size=position_size, sl=sl_price, tp=tp_price)
+        elif direction_pred < 0.5 and not self.position:
+            # Short position
+            self.sell(size=position_size, sl=sl_price, tp=tp_price)
 
-            # Check for position exit based on prediction reversal and regime
-            regime = self.regime[-1]
-            exit_threshold = 0.3 if regime != 2 else 0.4  # More conservative in high vol
+        # Update drawdown tracking
+        self.update_drawdown()
 
-            if self.position.is_long and (expected_return < 0 or direction_conf < exit_threshold):
-                self.position.close()
-            elif self.position.is_short and (expected_return > 0 or direction_conf > (1 - exit_threshold)):
-                self.position.close()
+        # Close position if maximum drawdown exceeded
+        if self.current_drawdown > self.max_drawdown and self.position:
+            self.position.close()
