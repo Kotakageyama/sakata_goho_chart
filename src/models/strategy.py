@@ -138,28 +138,30 @@ class TransformerStrategy(Strategy):
     def calculate_position_size(self) -> float:
         """
         Calculate position size based on volatility and current regime.
-        Returns: Position size as a fraction of portfolio value.
+        Returns: Position size as a fraction of portfolio value (0 to 1).
         """
-        # Base position size
-        base_size = self.position_size
+        # Base position size (as a fraction of portfolio)
+        base_size = 0.2  # Start with 20% of portfolio
 
-        # Adjust for volatility
-        if self.volatility[-1] > 0:
-            vol_multiplier = 1 / (self.volatility[-1] * np.sqrt(252))  # Annualized volatility
-            base_size *= min(vol_multiplier, 2.0)  # Cap at 2x leverage
+        # Volatility adjustment
+        vol = self.volatility[-1]
+        if vol > 0:
+            # Reduce position size when volatility is high
+            vol_multiplier = 1 / (vol * np.sqrt(252))
+            base_size *= min(vol_multiplier, 2.0)
 
-        # Adjust for market regime
+        # Regime-based adjustment
         regime = self.regime[-1]
-        if regime == 0:  # Low volatility
-            regime_multiplier = 1.2
-        elif regime == 2:  # High volatility
-            regime_multiplier = 0.8
-        else:  # Medium volatility
-            regime_multiplier = 1.0
+        regime_multiplier = {
+            0: 1.2,  # Low volatility regime
+            1: 1.0,  # Medium volatility regime
+            2: 0.8,  # High volatility regime
+        }.get(regime, 1.0)
 
-        # Apply regime adjustment and ensure within limits
-        position_size = base_size * regime_multiplier
-        return max(min(position_size, 2.0), 0.1)
+        # Apply regime multiplier and ensure size is between 0.1 and 1.0
+        final_size = min(max(base_size * regime_multiplier, 0.1), 1.0)
+
+        return final_size
 
     def calculate_take_profit_stop_loss(self, entry_price: float, current_atr: float) -> Tuple[float, float]:
         """
