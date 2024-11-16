@@ -4,7 +4,7 @@ TransformerStrategy implementation for cryptocurrency trading.
 import numpy as np
 import pandas as pd
 from backtesting import Strategy
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 class TransformerStrategy(Strategy):
     """Trading strategy using Transformer model predictions."""
@@ -17,7 +17,7 @@ class TransformerStrategy(Strategy):
     atr_window = 14
     take_profit = 0.03
     stop_loss = 0.02
-    predictions: Optional[Dict[str, pd.Series]] = None
+    predictions: Optional[Dict[str, Union[np.ndarray, pd.Series]]] = None
 
     def init(self):
         """Initialize strategy parameters and indicators."""
@@ -28,9 +28,12 @@ class TransformerStrategy(Strategy):
                 'direction': np.full(len(self.data.Close), np.nan)
             }
         else:
+            # Convert to numpy arrays if they're pandas Series
             self.predictions = {
-                'price': self.predictions['price'].to_numpy(),
-                'direction': self.predictions['direction'].to_numpy()
+                'price': self.predictions['price'].values if hasattr(self.predictions['price'], 'values')
+                        else np.asarray(self.predictions['price']),
+                'direction': self.predictions['direction'].values if hasattr(self.predictions['direction'], 'values')
+                        else np.asarray(self.predictions['direction'])
             }
 
         # Technical indicators (already added by data loader)

@@ -33,7 +33,7 @@ class BacktestEvaluator:
         """Set predictions for backtesting."""
         if len(predictions['price']) != len(self.data) or len(predictions['direction']) != len(self.data):
             raise ValueError("Prediction arrays must match data length")
-        self.predictions = predictions
+        self.predictions = {k: np.asarray(v) for k, v in predictions.items()}  # Ensure numpy arrays
 
     def _run_backtest(self, **kwargs) -> Dict:
         """Run a single backtest with given parameters."""
