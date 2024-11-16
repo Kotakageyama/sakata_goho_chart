@@ -7,6 +7,27 @@ import numpy as np
 from typing import List, Union, Optional
 import ta
 from sklearn.preprocessing import MinMaxScaler
+from pathlib import Path
+
+def load_and_preprocess_data(file_path: str) -> pd.DataFrame:
+    """
+    Load and preprocess data from a CSV file.
+    Adds technical indicators and handles missing values.
+
+    Args:
+        file_path: Path to the CSV file
+
+    Returns:
+        Preprocessed DataFrame with technical indicators
+    """
+    loader = CryptoDataLoader()
+    # Load raw data
+    df = loader.load_data(file_path)
+    # Add technical indicators
+    df = loader.add_technical_indicators(df)
+    # Handle missing values
+    df = df.fillna(method='ffill').fillna(method='bfill')
+    return df
 
 class CryptoDataLoader:
     def __init__(self):
@@ -27,6 +48,9 @@ class CryptoDataLoader:
                 # For Google Colab environment
                 from google.colab import drive
                 drive.mount('/content/drive')
+
+            # Expand user path if necessary
+            file_path = file_path.replace('~', str(Path.home()))
 
             df = pd.read_csv(file_path)
 
