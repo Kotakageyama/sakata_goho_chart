@@ -146,26 +146,26 @@ class TransformerStrategy(Strategy):
             if np.isnan(atr) or atr <= 0:
                 atr = current_price * 0.02  # Default to 2% volatility
 
-            # Calculate risk amount (fixed percentage of equity)
-            risk_amount = self._equity * self.position_size
+            # Calculate position size as a fraction of equity (between 0 and 1)
+            # Use position_size parameter directly as the fraction
+            size = self.position_size  # This is already a fraction (e.g., 0.1 for 10%)
 
-            # Calculate stop loss distance
-            stop_distance = max(atr * 2, current_price * self.stop_loss)
+            # Ensure size is within valid range (1% to 25% of equity)
+            min_size = 0.01  # Minimum 1% of equity
+            max_size = 0.25  # Maximum 25% of equity
+            size = max(min_size, min(size, max_size))
 
-            # Calculate position size in units
-            size = (risk_amount / stop_distance)
+            # Adjust size based on volatility
+            volatility_factor = atr / current_price
+            if volatility_factor > 0.02:  # If volatility is high
+                size *= 0.02 / volatility_factor  # Reduce position size
 
-            # Ensure minimum position size (0.1 units)
-            min_position = 0.1
+            # Round to 4 decimal places to avoid floating point issues
+            size = round(size, 4)
 
-            # Maximum position size (25% of equity in value)
-            max_position = (self._equity * 0.25) / current_price
-
-            # Ensure size is within valid range
-            size = max(min_position, min(size, max_position))
-
-            return float(size)  # Ensure we return a float
+            print(f"Calculated position size: {size} (fraction of equity)")
+            return float(size)
 
         except Exception as e:
             print(f"Error in position sizing: {str(e)}")
-            return 0.1  # Return minimum size on error
+            return 0.01  # Return minimum size on error (1% of equity)
