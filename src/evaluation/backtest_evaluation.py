@@ -1,86 +1,66 @@
 """
 Backtesting evaluation module for the TransformerStrategy.
 """
-from typing import Dict, List, Union
 import numpy as np
 import pandas as pd
+from typing import Dict, List, Optional, Tuple
 import optuna
 from backtesting import Backtest
-from sklearn.model_selection import TimeSeriesSplit
-from ..data.data_loader import CryptoDataLoader
-from ..models.strategy import TransformerStrategy
+from src.models.strategy import TransformerStrategy
 
 class BacktestEvaluator:
     """Evaluator class for backtesting the TransformerStrategy."""
 
-    def __init__(self, data: Union[str, pd.DataFrame]):
-        """Initialize the evaluator with data."""
-        self.data_loader = CryptoDataLoader()
-        if isinstance(data, str):
-            self.data = self.data_loader.load_data(data)
-        else:
-            self.data = data.copy()
+    def __init__(self, data: pd.DataFrame):
+        """Initialize with either data or file path."""
+        self.data = data.copy()
+        self.data.index = pd.to_datetime(self.data.index)
+        self.data = self.data.sort_index()  # Ensure data is sorted
+        self.predictions = None
+        self._validate_data()
 
-        # Ensure data is sorted
-        if isinstance(self.data.index, pd.DatetimeIndex):
-            self.data.sort_index(inplace=True)
-
-        self.predictions = {
-            'price': np.full(len(self.data), np.nan),
-            'direction': np.full(len(self.data), np.nan)
-        }
+    def _validate_data(self):
+        """Validate the input data."""
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing_columns = [col for col in required_columns if col not in self.data.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
 
     def set_predictions(self, predictions: Dict[str, np.ndarray]):
-        """Set predictions for evaluation."""
+        """Set predictions for backtesting."""
         if len(predictions['price']) != len(self.data) or len(predictions['direction']) != len(self.data):
             raise ValueError("Prediction arrays must match data length")
-        self.predictions = predictions
+        self.predictions = {
+            'price': pd.Series(predictions['price'], index=self.data.index),
+            'direction': pd.Series(predictions['direction'], index=self.data.index)
+        }
 
-    def calculate_sharpe_ratio(self, returns: pd.Series) -> float:
-        """Calculate Sharpe ratio with proper error handling."""
-        if len(returns) == 0 or returns.std() == 0:
-            return 0.0
+    def _run_backtest(self, **kwargs) -> Dict:
+        """Run a single backtest with given parameters."""
+        if self.predictions is None:
+            raise ValueError("Predictions must be set before running backtest")
+
         try:
-            sharpe = np.sqrt(252) * (returns.mean() / returns.std())
-            return 0.0 if np.isnan(sharpe) else sharpe
-        except:
-            return 0.0
+            # Create strategy instance with parameters
+            strategy_class = type('DynamicStrategy', (TransformerStrategy,), {
+                'predictions': self.predictions,
+                **kwargs
+            })
 
-    def calculate_max_drawdown(self, equity_curve: pd.Series) -> float:
-        """Calculate maximum drawdown with proper error handling."""
-        try:
-            peak = equity_curve.expanding(min_periods=1).max()
-            drawdown = (equity_curve - peak) / peak
-            max_dd = abs(drawdown.min())
-            return 0.0 if np.isnan(max_dd) else max_dd
-        except:
-            return 0.0
+            # Run backtest
+            bt = Backtest(self.data, strategy_class,
+                         cash=100000, commission=.002,
+                         exclusive_orders=True)
 
-    def run_backtest(self, cash: float = 100000, commission: float = 0.001,
-                    **strategy_params) -> Dict:
-        """Run backtest with current settings."""
-        try:
-            strategy_params['predictions'] = self.predictions
-            bt = Backtest(
-                self.data,
-                TransformerStrategy,
-                cash=cash,
-                commission=commission,
-                exclusive_orders=True
-            )
-            stats = bt.run(**strategy_params)
+            stats = bt.run()
 
-            # Calculate additional metrics
-            returns = pd.Series(stats._equity_curve['Equity'].pct_change().dropna())
-            sharpe = self.calculate_sharpe_ratio(returns)
-            max_dd = self.calculate_max_drawdown(stats._equity_curve['Equity'])
-
+            # Extract key metrics
             return {
-                'sharpe_ratio': sharpe,
-                'max_drawdown': max_dd,
-                'total_return': stats['Return [%]'] / 100,
-                'win_rate': stats['Win Rate [%]'] / 100,
-                'equity_curve': stats._equity_curve['Equity']
+                'sharpe_ratio': float(stats['Sharpe Ratio']) if not np.isnan(stats['Sharpe Ratio']) else 0.0,
+                'max_drawdown': float(stats['Max. Drawdown']) if not np.isnan(stats['Max. Drawdown']) else 1.0,
+                'total_return': float(stats['Return [%]']) / 100 if not np.isnan(stats['Return [%]']) else -1.0,
+                'win_rate': float(stats['Win Rate [%]']) / 100 if not np.isnan(stats['Win Rate [%]']) else 0.0,
+                'equity_curve': pd.Series(stats._equity_curve['Equity'], index=self.data.index)
             }
         except Exception as e:
             print(f"Backtest failed: {str(e)}")
@@ -89,7 +69,7 @@ class BacktestEvaluator:
                 'max_drawdown': 1.0,
                 'total_return': -1.0,
                 'win_rate': 0.0,
-                'equity_curve': pd.Series([])
+                'equity_curve': pd.Series(index=self.data.index)
             }
 
     def optimize_hyperparameters(self, n_trials: int = 30) -> Dict:
@@ -105,78 +85,66 @@ class BacktestEvaluator:
                 'stop_loss': trial.suggest_float('stop_loss', 0.01, 0.05)
             }
 
-            results = self.run_backtest(**params)
+            results = self._run_backtest(**params)
             score = results['sharpe_ratio'] * (1 - results['max_drawdown'])
-
-            # Penalize invalid results
-            if np.isnan(score) or np.isinf(score):
-                return -1.0
-
-            return score
+            return score if not np.isnan(score) else 0.0
 
         study = optuna.create_study(direction='maximize')
         study.optimize(objective, n_trials=n_trials)
 
         return {
-            'best_params': study.best_params if study.trials_dataframe is not None else {},
-            'best_value': study.best_value if study.trials_dataframe is not None else 0.0
+            'best_params': study.best_params,
+            'best_value': study.best_value
         }
 
-    def run_cross_validation(self, n_splits: int = 5) -> Dict[str, List[float]]:
-        """Run time series cross-validation."""
-        tscv = TimeSeriesSplit(n_splits=n_splits)
-        cv_results = {
+    def run_cross_validation(self, params: Dict, n_splits: int = 5) -> Dict[str, List[float]]:
+        """Perform time series cross-validation."""
+        results = {
             'sharpe_ratio': [],
             'max_drawdown': [],
             'total_return': [],
             'win_rate': []
         }
 
-        for train_idx, test_idx in tscv.split(self.data):
-            try:
-                # Prepare data for this fold
-                test_data = self.data.iloc[test_idx]
-                test_predictions = {
-                    'price': self.predictions['price'][test_idx],
-                    'direction': self.predictions['direction'][test_idx]
-                }
+        # Split data into n_splits segments
+        segment_size = len(self.data) // n_splits
+        for i in range(n_splits):
+            start_idx = i * segment_size
+            end_idx = (i + 1) * segment_size
 
-                # Create and run evaluator for this fold
-                fold_evaluator = BacktestEvaluator(test_data)
-                fold_evaluator.set_predictions(test_predictions)
-                results = fold_evaluator.run_backtest()
+            # Create segment data and predictions
+            segment_data = self.data.iloc[start_idx:end_idx].copy()
+            segment_predictions = {
+                'price': self.predictions['price'].iloc[start_idx:end_idx],
+                'direction': self.predictions['direction'].iloc[start_idx:end_idx]
+            }
 
-                # Store results
-                for metric in cv_results:
-                    cv_results[metric].append(results[metric])
-            except Exception as e:
-                print(f"Cross-validation fold failed: {str(e)}")
-                continue
+            # Create temporary evaluator for segment
+            temp_evaluator = BacktestEvaluator(segment_data)
+            temp_evaluator.set_predictions(segment_predictions)
 
-        return cv_results
+            # Run backtest on segment
+            segment_results = temp_evaluator._run_backtest(**params)
+
+            # Store results
+            for metric in results.keys():
+                results[metric].append(segment_results[metric])
+
+        return results
 
     def generate_evaluation_report(self) -> Dict:
         """Generate comprehensive evaluation report."""
-        try:
-            # Run optimization
-            opt_results = self.optimize_hyperparameters(n_trials=30)
+        # Optimize hyperparameters
+        optimization_results = self.optimize_hyperparameters()
 
-            # Run cross-validation
-            cv_results = self.run_cross_validation()
+        # Run cross-validation with best parameters
+        cv_results = self.run_cross_validation(optimization_results['best_params'])
 
-            # Run final backtest with optimized parameters
-            final_results = self.run_backtest(**opt_results['best_params'])
+        # Run final backtest with best parameters
+        final_results = self._run_backtest(**optimization_results['best_params'])
 
-            return {
-                'optimization_results': opt_results,
-                'cross_validation_results': cv_results,
-                'final_backtest_results': final_results
-            }
-        except Exception as e:
-            print(f"Error generating evaluation report: {str(e)}")
-            return {
-                'error': str(e),
-                'optimization_results': {},
-                'cross_validation_results': {},
-                'final_backtest_results': {}
-            }
+        return {
+            'optimization_results': optimization_results,
+            'cross_validation_results': cv_results,
+            'final_backtest_results': final_results
+        }
