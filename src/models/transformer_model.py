@@ -94,8 +94,8 @@ class TransformerBlock(layers.Layer):
         self.dropout1 = layers.Dropout(dropout)
         self.dropout2 = layers.Dropout(dropout)
 
-    def call(self, inputs: tf.Tensor, training: bool) -> tf.Tensor:
-        attention_output = self.attention(inputs, training)
+    def call(self, inputs: tf.Tensor, training: bool = False) -> tf.Tensor:
+        attention_output = self.attention(inputs, training=training)
         ffn_output = self.ffn(attention_output)
         ffn_output = self.dropout2(ffn_output, training=training)
         return self.layernorm2(attention_output + ffn_output)
@@ -158,7 +158,7 @@ class CryptoTransformer(Model):
 
         # Transformer blocks
         for transformer_block in self.transformer_blocks:
-            x = transformer_block(x, training)
+            x = transformer_block(x, training=training)
 
         # Global pooling
         x = self.global_avg_pooling(x)
