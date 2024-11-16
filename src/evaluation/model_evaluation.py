@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple, Optional
 import optuna
 from backtesting import Backtest
 import tensorflow as tf
-from ..models.transformer_model import CryptoTransformer
+from ..models.transformer_model import CryptoTransformer, create_model
 from ..models.strategy import TransformerStrategy
 
 class ModelEvaluator:
@@ -22,13 +22,31 @@ class ModelEvaluator:
         data: pd.DataFrame,
         validation_split: float = 0.2,
         n_splits: int = 5,
+        sequence_length: int = 60,
         random_seed: int = 42
     ):
         self.data = data
         self.validation_split = validation_split
         self.n_splits = n_splits
+        self.sequence_length = sequence_length
         self.random_seed = random_seed
         self.performance_metrics = {}
+
+    def prepare_sequences(self, data: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Prepare sequences for the transformer model.
+        """
+        features = ['Open', 'High', 'Low', 'Close', 'Volume']
+        sequences = []
+        targets = []
+
+        for i in range(len(data) - self.sequence_length):
+            seq = data[features].iloc[i:i+self.sequence_length].values
+            target = data['Close'].iloc[i+self.sequence_length]
+            sequences.append(seq)
+            targets.append(target)
+
+        return np.array(sequences), np.array(targets)
 
     def calculate_sharpe_ratio(
         self,
@@ -74,7 +92,7 @@ class ModelEvaluator:
     def cross_validate(
         self,
         model: CryptoTransformer,
-        strategy: TransformerStrategy
+        strategy_class: type
     ) -> Dict[str, List[float]]:
         """
         Perform time series cross-validation.
@@ -90,19 +108,39 @@ class ModelEvaluator:
             train_data = self.data.iloc[train_idx]
             val_data = self.data.iloc[val_idx]
 
+            # Prepare sequences
+            X_train, y_train = self.prepare_sequences(train_data)
+            X_val, y_val = self.prepare_sequences(val_data)
+
             # Train model
-            model.fit(train_data)
+            model.fit(
+                X_train,
+                {'price_output': y_train, 'direction_output': np.sign(np.diff(y_train, prepend=y_train[0]))},
+                validation_split=0.2,
+                epochs=50,
+                batch_size=32,
+                verbose=0
+            )
 
             # Generate predictions
-            predictions = model.predict(val_data)
+            predictions = model.predict(X_val)[0]  # Get price predictions
 
-            # Run backtest
-            bt = Backtest(val_data, strategy, cash=100000, commission=0.001)
+            # Initialize and run strategy
+            strategy = strategy_class(
+                model=model,
+                sequence_length=self.sequence_length
+            )
+            bt = Backtest(
+                val_data,
+                strategy,
+                cash=100000,
+                commission=0.001
+            )
             result = bt.run()
 
             # Calculate metrics
             metrics = self.calculate_metrics(
-                val_data['Close'].values,
+                y_val,
                 predictions,
                 result._equity_curve['Equity'].values,
                 result._equity_curve['Returns'].values
@@ -124,15 +162,22 @@ class ModelEvaluator:
         def objective(trial):
             # Define hyperparameter search space
             params = {
-                'n_heads': trial.suggest_int('n_heads', 4, 12),
-                'n_layers': trial.suggest_int('n_layers', 2, 6),
+                'sequence_length': self.sequence_length,
+                'num_features': 5,  # OHLCV
                 'd_model': trial.suggest_int('d_model', 32, 128, step=32),
-                'dropout_rate': trial.suggest_float('dropout_rate', 0.1, 0.5),
-                'learning_rate': trial.suggest_loguniform('learning_rate', 1e-4, 1e-2)
+                'num_heads': trial.suggest_int('num_heads', 4, 12),
+                'ff_dim': trial.suggest_int('ff_dim', 64, 256, step=64),
+                'num_transformer_blocks': trial.suggest_int('num_transformer_blocks', 2, 6),
+                'mlp_units': [
+                    trial.suggest_int('mlp_units_1', 32, 128, step=32),
+                    trial.suggest_int('mlp_units_2', 16, 64, step=16)
+                ],
+                'dropout': trial.suggest_float('dropout', 0.1, 0.5),
+                'mlp_dropout': trial.suggest_float('mlp_dropout', 0.1, 0.5)
             }
 
             # Create and train model with suggested parameters
-            model = CryptoTransformer(**params)
+            model = create_model(**params)
             cv_metrics = self.cross_validate(model, TransformerStrategy)
 
             # Use Sharpe ratio as optimization metric

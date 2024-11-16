@@ -12,9 +12,25 @@ project_root = str(Path(__file__).parent.parent.parent)
 sys.path.append(project_root)
 
 from src.data.data_loader import CryptoDataLoader
-from src.models.transformer_model import CryptoTransformer
+from src.models.transformer_model import CryptoTransformer, create_model
 from src.models.strategy import TransformerStrategy
 from src.evaluation.model_evaluation import ModelEvaluator
+
+def prepare_sequences(data: pd.DataFrame, sequence_length: int = 60) -> tuple:
+    """
+    Prepare sequences for the transformer model.
+    """
+    features = ['Open', 'High', 'Low', 'Close', 'Volume']
+    sequences = []
+    targets = []
+
+    for i in range(len(data) - sequence_length):
+        seq = data[features].iloc[i:i+sequence_length].values
+        target = data['Close'].iloc[i+sequence_length]
+        sequences.append(seq)
+        targets.append(target)
+
+    return np.array(sequences), np.array(targets)
 
 def main():
     # Load data
@@ -22,23 +38,32 @@ def main():
     loader = CryptoDataLoader()
     data = loader.load_data(data_path)
 
+    # Prepare sequences
+    sequence_length = 60
+    num_features = 5  # OHLCV
+    X, y = prepare_sequences(data, sequence_length)
+
     # Initialize evaluator
     evaluator = ModelEvaluator(data, n_splits=5)
 
-    # Create models with different configurations
+    # Model parameters
     base_params = {
-        'n_heads': 8,
-        'n_layers': 4,
+        'sequence_length': sequence_length,
+        'num_features': num_features,
         'd_model': 64,
-        'dropout_rate': 0.1,
-        'learning_rate': 0.001
+        'num_heads': 8,
+        'ff_dim': 128,
+        'num_transformer_blocks': 4,
+        'mlp_units': [64, 32],
+        'dropout': 0.1,
+        'mlp_dropout': 0.2
     }
 
-    # Initialize models
-    old_model = CryptoTransformer(**base_params)
-    new_model = CryptoTransformer(**base_params)
-
     print("最適化前のモデル評価開始...")
+
+    # Initialize models
+    old_model = create_model(**base_params)
+    new_model = create_model(**base_params)
 
     # Run initial cross-validation
     initial_metrics = evaluator.cross_validate(new_model, TransformerStrategy)
@@ -55,7 +80,9 @@ def main():
         print(f"{param}: {value}")
 
     # Create optimized model
-    optimized_model = CryptoTransformer(**best_params)
+    optimized_params = base_params.copy()
+    optimized_params.update(best_params)
+    optimized_model = create_model(**optimized_params)
 
     print("\nモデル比較開始...")
 
