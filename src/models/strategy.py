@@ -163,29 +163,34 @@ class TransformerStrategy(Strategy):
 
         return final_size
 
-    def calculate_take_profit_stop_loss(self, entry_price: float, current_atr: float) -> Tuple[float, float]:
+    def calculate_take_profit_stop_loss(
+        self,
+        entry_price: float,
+        current_atr: float
+    ) -> Tuple[float, float]:
         """
         Calculate adaptive take-profit and stop-loss levels.
-        Ensures valid price levels that are greater than 0.
+        Uses simple percentage-based calculations with ATR scaling.
         """
-        # Get current multipliers
-        tp_mult = max(self.tp_atr_multiplier[-1], 0.5)  # Minimum 0.5x ATR
-        sl_mult = max(self.sl_atr_multiplier[-1], 0.3)  # Minimum 0.3x ATR
+        # Base percentage moves (1% minimum)
+        base_tp_percent = 0.01
+        base_sl_percent = 0.01
 
-        # Calculate price movement based on ATR
-        price_movement = current_atr * entry_price
+        # Get current multipliers with minimum values
+        tp_mult = max(self.tp_atr_multiplier[-1], 0.5)
+        sl_mult = max(self.sl_atr_multiplier[-1], 0.3)
 
-        # Calculate levels based on ATR and ensure they're valid
+        # Scale percentages by ATR multiplier
+        tp_percent = base_tp_percent * tp_mult
+        sl_percent = base_sl_percent * sl_mult
+
+        # Calculate prices
         if self.position.is_long:
-            tp_price = entry_price * (1 + tp_mult * (price_movement / entry_price))
-            sl_price = entry_price * (1 - sl_mult * (price_movement / entry_price))
+            tp_price = entry_price * (1 + tp_percent)
+            sl_price = entry_price * (1 - sl_percent)
         else:  # Short position
-            tp_price = entry_price * (1 - tp_mult * (price_movement / entry_price))
-            sl_price = entry_price * (1 + sl_mult * (price_movement / entry_price))
-
-        # Ensure prices are valid (greater than 0 and not too close to entry)
-        tp_price = max(tp_price, entry_price * 1.001) if self.position.is_long else min(tp_price, entry_price * 0.999)
-        sl_price = min(sl_price, entry_price * 0.999) if self.position.is_long else max(sl_price, entry_price * 1.001)
+            tp_price = entry_price * (1 - tp_percent)
+            sl_price = entry_price * (1 + sl_percent)
 
         return tp_price, sl_price
 
