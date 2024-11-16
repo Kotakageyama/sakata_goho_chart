@@ -1,42 +1,47 @@
 """
-Backtest evaluation module for the TransformerStrategy.
+Backtesting evaluation module for the TransformerStrategy.
 """
-import pandas as pd
+from typing import Dict, List, Union
 import numpy as np
-from backtesting import Backtest
-from typing import Dict, List, Tuple
+import pandas as pd
 import optuna
-from src.models.strategy import TransformerStrategy
-from src.data.data_loader import CryptoDataLoader
+from backtesting import Backtest
 from sklearn.model_selection import TimeSeriesSplit
+from ..data.data_loader import CryptoDataLoader
+from ..models.strategy import TransformerStrategy
 
 class BacktestEvaluator:
-    def __init__(self, data_path: str):
-        """Initialize the backtest evaluator."""
-        self.data_loader = CryptoDataLoader()
-        self.data = self.data_loader.load_data(data_path)
-        self.data = self.data_loader.add_technical_indicators(self.data)
-        self.predictions = None
-        self.results = {}
+    """Evaluator class for backtesting the TransformerStrategy."""
 
-    def set_predictions(self, price_pred: np.ndarray, direction_pred: np.ndarray):
-        """Set model predictions for backtesting."""
+    def __init__(self, data: Union[str, pd.DataFrame]):
+        """Initialize the evaluator with data."""
+        self.data_loader = CryptoDataLoader()
+        if isinstance(data, str):
+            self.data = self.data_loader.load_data(data)
+        else:
+            self.data = data
         self.predictions = {
-            'price': price_pred,
-            'direction': direction_pred
+            'price': np.full(len(self.data), np.nan),
+            'direction': np.full(len(self.data), np.nan)
         }
 
+    def set_predictions(self, predictions: Dict[str, np.ndarray]):
+        """Set predictions for evaluation."""
+        if len(predictions['price']) != len(self.data) or len(predictions['direction']) != len(self.data):
+            raise ValueError("Prediction arrays must match data length")
+        self.predictions = predictions
+
     def calculate_sharpe_ratio(self, returns: pd.Series) -> float:
-        """Calculate the Sharpe ratio."""
+        """Calculate Sharpe ratio."""
         if len(returns) == 0:
             return 0.0
         return np.sqrt(252) * (returns.mean() / returns.std())
 
     def calculate_max_drawdown(self, equity_curve: pd.Series) -> float:
-        """Calculate the maximum drawdown."""
+        """Calculate maximum drawdown."""
         peak = equity_curve.expanding(min_periods=1).max()
         drawdown = (equity_curve - peak) / peak
-        return drawdown.min()
+        return abs(drawdown.min())
 
     def run_backtest(self, cash: float = 100000, commission: float = 0.001) -> Dict:
         """Run backtest with current settings."""
@@ -203,7 +208,8 @@ class BacktestEvaluator:
 def main():
     """Main function to run the evaluation."""
     # Initialize evaluator with data
-    evaluator = BacktestEvaluator('data/ETHUSD_2Year_2022-11-15_2024-11-15.csv')
+    data = pd.read_csv('data/ETHUSD_2Year_2022-11-15_2024-11-15.csv')
+    evaluator = BacktestEvaluator(data)
 
     # Generate dummy predictions for testing (replace with actual model predictions)
     n_samples = len(evaluator.data)
