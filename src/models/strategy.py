@@ -62,12 +62,17 @@ class TransformerStrategy(Strategy):
         Detect market regime using volatility and volume.
         Returns: 0 (low vol), 1 (medium vol), 2 (high vol)
         """
-        if len(self.volatility) < 20:
-            return 1  # Default to medium volatility regime
+        # Default to medium volatility regime during warmup period
+        if len(self.volatility) < 20 or pd.isna(self.volatility[-1]):
+            return 1
 
-        vol = self.volatility[-20:]
+        # Get last 20 periods of volatility data
+        vol = np.array([v for v in self.volatility[-20:] if not pd.isna(v)])
+        if len(vol) == 0:
+            return 1  # Default to medium volatility if no valid data
+
         vol_mean = np.mean(vol)
-        vol_std = np.std(vol)
+        vol_std = np.std(vol) if len(vol) > 1 else vol_mean
 
         if vol_mean < vol_std:
             return 0  # Low volatility regime
@@ -151,6 +156,16 @@ class TransformerStrategy(Strategy):
         """
         Determine if trading conditions are met, considering market regime.
         """
+        # Check for initialization period
+        warmup_period = 20  # Maximum lookback period for indicators
+        if len(self.data.Close) < warmup_period:
+            return False
+
+        # Check for NaN values in critical indicators
+        if (pd.isna(self.sma_fast[-1]) or pd.isna(self.sma_slow[-1]) or
+            pd.isna(self.rsi[-1]) or pd.isna(self.atr[-1])):
+            return False
+
         # Check confidence threshold
         if confidence < self.min_confidence:
             return False
