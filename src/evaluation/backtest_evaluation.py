@@ -40,19 +40,21 @@ class BacktestEvaluator:
 
     def run_backtest(self, cash: float = 100000, commission: float = 0.001) -> Dict:
         """Run backtest with current settings."""
+        # Create strategy instance
+        strategy = TransformerStrategy
+        strategy.price_predictions = self.predictions['price']
+        strategy.direction_predictions = self.predictions['direction']
+
+        # Run backtest
         bt = Backtest(
             self.data,
-            TransformerStrategy,
+            strategy,
             cash=cash,
             commission=commission,
             exclusive_orders=True
         )
 
-        # Set predictions in strategy
-        def set_predictions(strategy):
-            strategy.predictions = self.predictions
-
-        stats = bt.run(set_predictions)
+        stats = bt.run()
 
         # Calculate additional metrics
         returns = pd.Series(stats._equity_curve['Equity']).pct_change()
@@ -82,21 +84,23 @@ class BacktestEvaluator:
                 'stop_loss': trial.suggest_float('stop_loss', 0.01, 0.05)
             }
 
-            # Run backtest with parameters
+            # Create strategy instance with parameters
+            strategy = TransformerStrategy
+            for key, value in params.items():
+                setattr(strategy, key, value)
+            strategy.price_predictions = self.predictions['price']
+            strategy.direction_predictions = self.predictions['direction']
+
+            # Run backtest
             bt = Backtest(
                 self.data,
-                TransformerStrategy,
+                strategy,
                 cash=100000,
                 commission=0.001,
                 exclusive_orders=True
             )
 
-            def set_strategy_params(strategy):
-                strategy.predictions = self.predictions
-                for key, value in params.items():
-                    setattr(strategy, key, value)
-
-            stats = bt.run(set_strategy_params)
+            stats = bt.run()
 
             # Calculate objective value (combination of metrics)
             returns = pd.Series(stats._equity_curve['Equity']).pct_change()
@@ -128,19 +132,21 @@ class BacktestEvaluator:
                 'direction': self.predictions['direction'][test_idx]
             }
 
+            # Create strategy instance
+            strategy = TransformerStrategy
+            strategy.price_predictions = test_predictions['price']
+            strategy.direction_predictions = test_predictions['direction']
+
             # Run backtest on test set
             bt = Backtest(
                 test_data,
-                TransformerStrategy,
+                strategy,
                 cash=100000,
                 commission=0.001,
                 exclusive_orders=True
             )
 
-            def set_predictions(strategy):
-                strategy.predictions = test_predictions
-
-            stats = bt.run(set_predictions)
+            stats = bt.run()
 
             # Calculate metrics
             returns = pd.Series(stats._equity_curve['Equity']).pct_change()

@@ -13,107 +13,84 @@ class TransformerStrategy(Strategy):
     Enhanced Transformer-based trading strategy with dynamic risk management
     and market regime detection.
     """
-    def __init__(self):
-        """Initialize strategy parameters and indicators."""
-        super().__init__()
-
-        # Model predictions will be stored here
-        self.predictions = None  # Will be set externally
-
-        # Strategy parameters
-        self.n_lookback = 20
-        self.max_drawdown = 0.15  # 15% maximum drawdown
-        self.current_drawdown = 0
-        self.position_size = 0.1  # Base position size (10% of equity)
-        self.min_confidence = 0.6  # Minimum prediction confidence
-
-        # Technical indicators
-        self.rsi = self.I(self._calculate_rsi_series)
-        self.atr = self.I(self._calculate_atr_series)
-        self.regime = self.I(self._detect_market_regime)
-
-        # Adaptive multipliers for take-profit and stop-loss
-        self.tp_atr_multiplier = self.I(self._adaptive_tp_multiplier)
-        self.sl_atr_multiplier = self.I(self._adaptive_sl_multiplier)
-
-        # Store predictions as indicators
-        self.price_pred = None
-        self.direction_pred = None
+    min_confidence = 0.6
+    position_size = 0.2
+    max_drawdown = 0.2
+    rsi_window = 14
+    atr_window = 14
+    take_profit = 0.03
+    stop_loss = 0.02
 
     def init(self):
-        """Initialize indicators that require data."""
-        # Initialize prediction indicators
-        self.price_pred = self.I(lambda: np.array(self.predictions['price'] if self.predictions else [np.nan] * len(self.data.Close)))
-        self.direction_pred = self.I(lambda: np.array(self.predictions['direction'] if self.predictions else [np.nan] * len(self.data.Close)))
+        """Initialize strategy parameters and indicators."""
+        # Initialize predictions as numpy arrays
+        self.price_predictions = np.full(len(self.data.Close), np.nan)
+        self.direction_predictions = np.full(len(self.data.Close), np.nan)
 
-    def _calculate_rsi_series(self) -> pd.Series:
-        """Calculate RSI for the entire series."""
-        close_series = pd.Series(self.data.Close)
-        delta = close_series.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        return pd.Series(100 - (100 / (1 + rs)))
+        # Technical indicators (already added by data loader)
+        self.rsi = self.I(lambda: self.data.RSI)
+        self.atr = self.I(lambda: self.data.ATR)
+        self.sma_fast = self.I(lambda: self.data.SMA_10)
+        self.sma_slow = self.I(lambda: self.data.SMA_20)
+        self.macd = self.I(lambda: self.data.MACD)
+        self.signal = self.I(lambda: self.data.Signal_Line)
 
-    def _calculate_atr_series(self) -> pd.Series:
-        """Calculate ATR for the entire series."""
-        high = pd.Series(self.data.High)
-        low = pd.Series(self.data.Low)
-        close = pd.Series(self.data.Close)
-        tr1 = high - low
-        tr2 = abs(high - close.shift())
-        tr3 = abs(low - close.shift())
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        return tr.rolling(window=14).mean()
+        # Track equity for drawdown calculation
+        self.equity_peak = self.equity
 
-    def _detect_market_regime(self) -> np.ndarray:
-        """
-        Detect market regime using volatility.
-        Returns: Array of regime values (0: low vol, 1: medium vol, 2: high vol)
-        """
-        # Initialize array with medium volatility regime
-        regimes = np.ones(len(self.data.Close))
+    def set_predictions(self, price_pred: np.ndarray, direction_pred: np.ndarray):
+        """Set predictions for the strategy."""
+        if len(price_pred) != len(self.data.Close) or len(direction_pred) != len(self.data.Close):
+            raise ValueError("Prediction arrays must match data length")
+        self.price_predictions = price_pred
+        self.direction_predictions = direction_pred
 
-        # Wait for enough data
-        if len(self.data.Close) < 20:
-            return regimes
+    def should_trade(self) -> bool:
+        """Determine if trading conditions are met."""
+        # Check if we have valid predictions
+        if np.isnan(self.price_predictions[-1]) or np.isnan(self.direction_predictions[-1]):
+            return False
 
-        # Calculate rolling volatility statistics
-        for i in range(20, len(self.data.Close)):
-            # Get volatility window
-            vol_window = [v for v in self.volatility[i-20:i] if not pd.isna(v)]
+        # Check confidence level
+        if abs(self.direction_predictions[-1] - 0.5) < self.min_confidence:
+            return False
 
-            if len(vol_window) < 2:
-                continue
+        # Check drawdown limit
+        current_drawdown = (self.equity - self.equity_peak) / self.equity_peak
+        if current_drawdown < -self.max_drawdown:
+            return False
 
-            vol = np.array(vol_window)
-            vol_mean = np.mean(vol)
-            vol_std = np.std(vol)
+        return True
 
-            if vol_mean < vol_std:
-                regimes[i] = 0  # Low volatility regime
-            elif vol_mean > 2 * vol_std:
-                regimes[i] = 2  # High volatility regime
+    def next(self):
+        """Execute trading logic for the current candle."""
+        # Update equity peak
+        if self.equity > self.equity_peak:
+            self.equity_peak = self.equity
 
-        return regimes
+        # Skip if trading conditions are not met
+        if not self.should_trade():
+            return
 
-    def _adaptive_tp_multiplier(self) -> pd.Series:
-        """
-        Calculate adaptive take-profit multiplier based on market conditions.
-        Returns a series of multipliers.
-        """
-        # Base multiplier
-        base_tp = 2.0
+        # Calculate position size based on ATR
+        risk_adjusted_size = self.position_size * (1 / (self.atr[-1] / self.data.Close[-1]))
+        size = max(0.1, min(1.0, risk_adjusted_size))  # Limit position size between 10% and 100%
 
-        # Adjust based on volatility
-        volatility_factor = pd.Series(self.volatility).fillna(0)
-        volatility_adjustment = 1 + volatility_factor
+        # Calculate take-profit and stop-loss levels
+        current_price = self.data.Close[-1]
+        atr_multiplier = self.atr[-1] / current_price
 
-        # Adjust based on RSI
-        rsi_series = pd.Series(self.rsi).fillna(50)
-        rsi_factor = np.where(rsi_series > 70, 0.8, np.where(rsi_series < 30, 1.2, 1.0))
+        if self.direction_predictions[-1] > 0.5:  # Bullish signal
+            if not self.position:  # Enter long position
+                sl = current_price * (1 - max(self.stop_loss, 2 * atr_multiplier))
+                tp = current_price * (1 + max(self.take_profit, 3 * atr_multiplier))
+                self.buy(size=size, sl=sl, tp=tp)
 
-        return pd.Series(base_tp * volatility_adjustment * rsi_factor)
+        else:  # Bearish signal
+            if not self.position:  # Enter short position
+                sl = current_price * (1 + max(self.stop_loss, 2 * atr_multiplier))
+                tp = current_price * (1 - max(self.take_profit, 3 * atr_multiplier))
+                self.sell(size=size, sl=sl, tp=tp)
 
     def _adaptive_sl_multiplier(self) -> pd.Series:
         """
