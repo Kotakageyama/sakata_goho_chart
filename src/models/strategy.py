@@ -17,15 +17,15 @@ class TransformerStrategy(Strategy):
     atr_window = 14
     take_profit = 0.03
     stop_loss = 0.02
-    predictions: Optional[Dict[str, np.ndarray]] = None
+    predictions: Optional[Dict[str, pd.Series]] = None
 
     def init(self):
         """Initialize strategy parameters and indicators."""
         # Ensure predictions are set
         if not hasattr(self, 'predictions') or self.predictions is None:
             self.predictions = {
-                'price': np.full(len(self.data.Close), np.nan),
-                'direction': np.full(len(self.data.Close), np.nan)
+                'price': pd.Series(np.full(len(self.data.Close), np.nan), index=self.data.Close.index),
+                'direction': pd.Series(np.full(len(self.data.Close), np.nan), index=self.data.Close.index)
             }
 
         # Technical indicators (already added by data loader)
@@ -41,12 +41,14 @@ class TransformerStrategy(Strategy):
 
     def should_trade(self) -> bool:
         """Determine if trading conditions are met."""
+        current_idx = len(self.data) - 1
+
         # Check if we have valid predictions
-        if np.isnan(self.predictions['direction'][-1]):
+        if np.isnan(self.predictions['direction'].iloc[current_idx]):
             return False
 
         # Check confidence level (less restrictive)
-        confidence = abs(self.predictions['direction'][-1] - 0.5)
+        confidence = abs(self.predictions['direction'].iloc[current_idx] - 0.5)
         if confidence < (self.min_confidence - 0.5):  # Adjusted threshold calculation
             return False
 
@@ -67,18 +69,20 @@ class TransformerStrategy(Strategy):
 
     def next(self):
         """Execute trading logic for the current candle."""
+        current_idx = len(self.data) - 1
+
         # Skip if trading conditions are not met
         if not self.should_trade():
             return
 
         # Calculate position size based on ATR
-        current_price = self.data.Close[-1]
+        current_price = self.data.Close.iloc[current_idx]
         size = self._calculate_position_size(current_price)
 
         # Calculate take-profit and stop-loss levels
-        atr_multiplier = self.atr[-1] / current_price
+        atr_multiplier = self.atr.iloc[current_idx] / current_price
 
-        if self.predictions['direction'][-1] > 0.5:  # Bullish signal
+        if self.predictions['direction'].iloc[current_idx] > 0.5:  # Bullish signal
             if not self.position:  # Enter long position
                 sl = current_price * (1 - max(self.stop_loss, 2 * atr_multiplier))
                 tp = current_price * (1 + max(self.take_profit, 3 * atr_multiplier))
@@ -90,22 +94,10 @@ class TransformerStrategy(Strategy):
                 tp = current_price * (1 - max(self.take_profit, 3 * atr_multiplier))
                 self.sell(size=size, sl=sl, tp=tp)
 
-    def _calculate_atr(self) -> float:
-        """Calculate ATR for risk management."""
-        high = self.data.High[-self.atr_window:]
-        low = self.data.Low[-self.atr_window:]
-        close = self.data.Close[-self.atr_window:]
-
-        tr1 = high - low
-        tr2 = abs(high - pd.Series(close).shift())
-        tr3 = abs(low - pd.Series(close).shift())
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-        return tr.mean()
-
     def _calculate_position_size(self, current_price: float) -> float:
         """Calculate position size based on ATR and risk parameters."""
-        atr = self._calculate_atr()
+        current_idx = len(self.data) - 1
+        atr = self.atr.iloc[current_idx]
         risk_per_trade = self.position_size * self.equity
         price_risk = atr * 2  # Use 2x ATR for initial stop distance
 
