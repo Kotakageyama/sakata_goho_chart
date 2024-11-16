@@ -41,44 +41,42 @@ class BacktestEvaluator:
             raise ValueError("Predictions must be set before running backtest")
 
         try:
-            # Create strategy class with parameters
+            # Initialize strategy with parameters
             strategy_params = {
                 'predictions': self.predictions,
                 **kwargs
             }
 
-            # Run backtest
+            # Set initial cash/equity
+            cash = 100000  # Start with 100k initial capital
+
+            # Run backtest with proper initialization
             bt = Backtest(
                 self.data,
                 TransformerStrategy,
-                cash=100000,
+                cash=cash,
                 commission=.002,
-                exclusive_orders=True
+                exclusive_orders=True,
+                trade_on_close=False,
             )
 
-            # Run optimization with strategy parameters
+            # Run optimization
             stats = bt.run(**strategy_params)
 
-            # Extract metrics safely
-            try:
-                sharpe = float(stats['Sharpe Ratio'])
-                max_dd = float(stats['Max. Drawdown'])
-                total_return = float(stats['Return [%]'])
-                win_rate = float(stats['Win Rate [%]'])
-            except (KeyError, TypeError, ValueError) as e:
-                print(f"Error extracting metrics: {str(e)}")
-                sharpe, max_dd, total_return, win_rate = 0.0, 1.0, -1.0, 0.0
-
-            return {
-                'sharpe_ratio': 0.0 if np.isnan(sharpe) else sharpe,
-                'max_drawdown': 1.0 if np.isnan(max_dd) else max_dd / 100,
-                'total_return': -1.0 if np.isnan(total_return) else total_return / 100,
-                'win_rate': 0.0 if np.isnan(win_rate) else win_rate / 100,
-                'equity_curve': pd.Series(stats._equity_curve['Equity'])
+            # Extract key metrics
+            metrics = {
+                'sharpe_ratio': float(stats['Sharpe Ratio']) if 'Sharpe Ratio' in stats else 0.0,
+                'max_drawdown': float(stats['Max. Drawdown']) if 'Max. Drawdown' in stats else 1.0,
+                'total_return': float(stats['Return [%]']) / 100 if 'Return [%]' in stats else -1.0,
+                'win_rate': float(stats['Win Rate [%]']) / 100 if 'Win Rate [%]' in stats else 0.0,
+                'equity_curve': stats._equity_curve['Equity'] if hasattr(stats, '_equity_curve') else pd.Series(index=self.data.index)
             }
+
+            return metrics
 
         except Exception as e:
             print(f"Backtest failed: {str(e)}")
+            # Return default metrics on failure
             return {
                 'sharpe_ratio': 0.0,
                 'max_drawdown': 1.0,
