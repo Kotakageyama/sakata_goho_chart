@@ -89,28 +89,52 @@ class ModelEvaluator:
         }
         return metrics
 
+    def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
+        """Calculate RSI technical indicator."""
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        return 100 - (100 / (1 + rs))
+
+    def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> pd.Series:
+        """Calculate Average True Range (ATR)."""
+        high = data['High']
+        low = data['Low']
+        close = data['Close']
+        tr1 = high - low
+        tr2 = abs(high - close.shift())
+        tr3 = abs(low - close.shift())
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        return tr.rolling(window=period).mean()
+
     def cross_validate(
         self,
         model: CryptoTransformer,
-        strategy_class: type
-    ) -> Dict[str, List[float]]:
+        strategy_class: type,
+        n_splits: int = 5
+    ) -> dict:
         """
-        Perform time series cross-validation.
+        Perform cross-validation with the model and strategy.
         """
-        tscv = TimeSeriesSplit(n_splits=self.n_splits)
-        cv_metrics = {
-            'rmse': [], 'sharpe_ratio': [], 'max_drawdown': [],
-            'total_return': [], 'volatility': [], 'win_rate': []
-        }
+        from sklearn.model_selection import TimeSeriesSplit
+        import pandas as pd
 
-        for train_idx, val_idx in tscv.split(self.data):
+        cv_metrics = []
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+
+        # Load and prepare data
+        data = pd.read_csv('data/ETHUSD_2Year_2022-11-15_2024-11-15.csv')
+        data['Date'] = pd.to_datetime(data['Date'])
+        data.set_index('Date', inplace=True)
+
+        # Prepare sequences for the entire dataset
+        X, y = self.prepare_sequences(data)
+
+        for train_idx, val_idx in tscv.split(X):
             # Split data
-            train_data = self.data.iloc[train_idx]
-            val_data = self.data.iloc[val_idx]
-
-            # Prepare sequences
-            X_train, y_train = self.prepare_sequences(train_data)
-            X_val, y_val = self.prepare_sequences(val_data)
+            X_train, X_val = X[train_idx], X[val_idx]
+            y_train, y_val = y[train_idx], y[val_idx]
 
             # Train model
             model.fit(
@@ -127,18 +151,26 @@ class ModelEvaluator:
             price_predictions = predictions['price_output']
             direction_predictions = predictions['direction_output']
 
-            # Initialize and run strategy
-            strategy = strategy_class(
-                model=model,
-                sequence_length=self.sequence_length
-            )
-            bt = Backtest(
-                val_data,
-                strategy,
-                cash=100000,
-                commission=0.001
-            )
-            result = bt.run()
+            # Get corresponding validation data for backtesting
+            val_dates = data.index[val_idx[-len(y_val):]]
+            val_data = data.loc[val_dates].copy()
+
+            # Add predictions to validation data
+            val_data['price_pred'] = price_predictions
+            val_data['direction_pred'] = direction_predictions
+
+            # Calculate technical indicators
+            val_data['SMA_10'] = val_data['Close'].rolling(window=10).mean()
+            val_data['SMA_20'] = val_data['Close'].rolling(window=20).mean()
+            val_data['RSI'] = self._calculate_rsi(val_data['Close'])
+            val_data['ATR'] = self._calculate_atr(val_data[['High', 'Low', 'Close']])
+            val_data['volatility'] = val_data['Close'].pct_change().rolling(window=20).std()
+
+            # Forward fill any NaN values from indicators
+            val_data.fillna(method='ffill', inplace=True)
+
+            # Run backtest
+            result = self.run_backtest(strategy_class, val_data)
 
             # Calculate metrics
             metrics = self.calculate_metrics(
@@ -147,12 +179,39 @@ class ModelEvaluator:
                 result._equity_curve['Equity'].values,
                 result._equity_curve['Returns'].values
             )
+            cv_metrics.append(metrics)
 
-            # Store metrics
-            for key, value in metrics.items():
-                cv_metrics[key].append(value)
+        # Average metrics across folds
+        avg_metrics = {
+            k: np.mean([m[k] for m in cv_metrics])
+            for k in cv_metrics[0].keys()
+        }
 
-        return cv_metrics
+        return avg_metrics
+
+    def run_backtest(self, strategy_class, data: pd.DataFrame) -> object:
+        """
+        Run backtesting on the given strategy and data.
+
+        Args:
+            strategy_class: The strategy class to use
+            data: DataFrame containing OHLCV data and predictions
+
+        Returns:
+            Backtesting.Backtest result object
+        """
+        from backtesting import Backtest
+
+        # Ensure data has required columns
+        required_columns = ['Open', 'High', 'Low', 'Close', 'price_pred', 'direction_pred',
+                          'SMA_10', 'SMA_20', 'RSI', 'ATR', 'volatility']
+        missing_columns = [col for col in required_columns if col not in data.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+
+        # Run backtest
+        bt = Backtest(data, strategy_class, cash=100000, commission=0.001)
+        return bt.run()
 
     def optimize_hyperparameters(
         self,
