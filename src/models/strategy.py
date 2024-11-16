@@ -106,12 +106,21 @@ class TransformerStrategy(Strategy):
         """Calculate position size based on ATR and risk parameters."""
         current_idx = len(self.data) - 1
         atr = self.atr[current_idx]
-        risk_per_trade = self.position_size * self.equity
-        price_risk = atr * 2  # Use 2x ATR for initial stop distance
 
-        # Calculate position size based on risk
-        size = risk_per_trade / (current_price * self.stop_loss)
+        # Ensure we have valid ATR value
+        if np.isnan(atr) or atr <= 0:
+            atr = current_price * 0.02  # Default to 2% volatility
 
-        # Limit position size
-        max_size = self.equity * 0.5 / current_price  # Maximum 50% of equity
-        return min(size, max_size)
+        # Calculate risk amount (fixed percentage of equity)
+        risk_amount = self.equity * self.position_size
+
+        # Calculate position size based on ATR for stop loss
+        stop_distance = max(atr * 2, current_price * self.stop_loss)  # Use larger of ATR or fixed stop
+
+        # Calculate size in units
+        size = risk_amount / stop_distance
+
+        # Ensure size is positive and within limits
+        size = max(0.01, min(size, self.equity / current_price))  # Minimum 1% of position, maximum 100% of equity
+
+        return size
