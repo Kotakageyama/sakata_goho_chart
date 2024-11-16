@@ -5,7 +5,7 @@ Includes multi-task learning and improved attention mechanisms.
 import tensorflow as tf
 from tensorflow.keras import layers, Model
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 
 class PositionalEncoding(layers.Layer):
     def __init__(self, position: int, d_model: int):
@@ -150,7 +150,7 @@ class CryptoTransformer(Model):
             ])
         self.direction_output = layers.Dense(1, activation="sigmoid", name="direction_output")
 
-    def call(self, inputs: tf.Tensor, training: bool = False) -> Tuple[tf.Tensor, tf.Tensor]:
+    def call(self, inputs: tf.Tensor, training: bool = False) -> Dict[str, tf.Tensor]:
         # Input embedding and positional encoding
         x = self.feature_embedding(inputs)
         x = self.pos_encoding(x)
@@ -175,7 +175,10 @@ class CryptoTransformer(Model):
             direction_features = layer(direction_features, training=training)
         direction_output = self.direction_output(direction_features)
 
-        return price_output, direction_output
+        return {
+            'price_output': price_output,
+            'direction_output': direction_output
+        }
 
 def create_model(
     sequence_length: int,
@@ -187,9 +190,9 @@ def create_model(
     mlp_units: list = [128, 64],
     dropout: float = 0.1,
     mlp_dropout: float = 0.2,
-) -> CryptoTransformer:
+) -> tf.keras.Model:
     """
-    Create a CryptoTransformer model instance with the specified parameters.
+    Create and compile a CryptoTransformer model.
     """
     model = CryptoTransformer(
         sequence_length=sequence_length,
@@ -203,21 +206,33 @@ def create_model(
         mlp_dropout=mlp_dropout,
     )
 
-    # Compile with custom loss weights
+    # Define loss weights
+    loss_weights = {
+        'price_output': 1.0,
+        'direction_output': 0.5
+    }
+
+    # Define metrics
+    metrics = {
+        'price_output': [
+            tf.keras.metrics.RootMeanSquaredError(),
+            tf.keras.metrics.MeanAbsoluteError()
+        ],
+        'direction_output': [
+            tf.keras.metrics.BinaryAccuracy(),
+            tf.keras.metrics.AUC()
+        ]
+    }
+
+    # Compile model
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
         loss={
-            "price_output": "mse",
-            "direction_output": "binary_crossentropy"
+            'price_output': 'mse',
+            'direction_output': 'binary_crossentropy'
         },
-        loss_weights={
-            "price_output": 1.0,
-            "direction_output": 0.2
-        },
-        metrics={
-            "price_output": ["mae", "mse"],
-            "direction_output": ["accuracy"]
-        }
+        loss_weights=loss_weights,
+        metrics=metrics
     )
 
     return model
