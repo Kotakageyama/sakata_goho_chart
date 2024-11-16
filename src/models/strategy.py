@@ -1,18 +1,15 @@
 """
-Enhanced Transformer-based trading strategy implementation.
+TransformerStrategy implementation for cryptocurrency trading.
 """
-from typing import Tuple
 import numpy as np
 import pandas as pd
 from backtesting import Strategy
-from backtesting.lib import crossover
-from sklearn.cluster import KMeans
+from typing import Dict, Optional
 
 class TransformerStrategy(Strategy):
-    """
-    Enhanced Transformer-based trading strategy with dynamic risk management
-    and market regime detection.
-    """
+    """Trading strategy using Transformer model predictions."""
+
+    # Class parameters for optimization
     min_confidence = 0.6
     position_size = 0.2
     max_drawdown = 0.2
@@ -20,12 +17,16 @@ class TransformerStrategy(Strategy):
     atr_window = 14
     take_profit = 0.03
     stop_loss = 0.02
+    predictions: Optional[Dict[str, np.ndarray]] = None
 
     def init(self):
         """Initialize strategy parameters and indicators."""
-        # Initialize predictions as numpy arrays
-        self.price_predictions = np.full(len(self.data.Close), np.nan)
-        self.direction_predictions = np.full(len(self.data.Close), np.nan)
+        # Ensure predictions are set
+        if not hasattr(self, 'predictions') or self.predictions is None:
+            self.predictions = {
+                'price': np.full(len(self.data.Close), np.nan),
+                'direction': np.full(len(self.data.Close), np.nan)
+            }
 
         # Technical indicators (already added by data loader)
         self.rsi = self.I(lambda: self.data.RSI)
@@ -38,21 +39,14 @@ class TransformerStrategy(Strategy):
         # Track equity for drawdown calculation
         self.equity_peak = self.equity
 
-    def set_predictions(self, price_pred: np.ndarray, direction_pred: np.ndarray):
-        """Set predictions for the strategy."""
-        if len(price_pred) != len(self.data.Close) or len(direction_pred) != len(self.data.Close):
-            raise ValueError("Prediction arrays must match data length")
-        self.price_predictions = price_pred
-        self.direction_predictions = direction_pred
-
     def should_trade(self) -> bool:
         """Determine if trading conditions are met."""
         # Check if we have valid predictions
-        if np.isnan(self.price_predictions[-1]) or np.isnan(self.direction_predictions[-1]):
+        if np.isnan(self.predictions['direction'][-1]):
             return False
 
         # Check confidence level
-        if abs(self.direction_predictions[-1] - 0.5) < self.min_confidence:
+        if abs(self.predictions['direction'][-1] - 0.5) < self.min_confidence:
             return False
 
         # Check drawdown limit
@@ -73,14 +67,13 @@ class TransformerStrategy(Strategy):
             return
 
         # Calculate position size based on ATR
-        risk_adjusted_size = self.position_size * (1 / (self.atr[-1] / self.data.Close[-1]))
-        size = max(0.1, min(1.0, risk_adjusted_size))  # Limit position size between 10% and 100%
+        current_price = self.data.Close[-1]
+        size = self._calculate_position_size(current_price)
 
         # Calculate take-profit and stop-loss levels
-        current_price = self.data.Close[-1]
         atr_multiplier = self.atr[-1] / current_price
 
-        if self.direction_predictions[-1] > 0.5:  # Bullish signal
+        if self.predictions['direction'][-1] > 0.5:  # Bullish signal
             if not self.position:  # Enter long position
                 sl = current_price * (1 - max(self.stop_loss, 2 * atr_multiplier))
                 tp = current_price * (1 + max(self.take_profit, 3 * atr_multiplier))
