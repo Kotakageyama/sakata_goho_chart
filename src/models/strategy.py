@@ -10,7 +10,7 @@ class TransformerStrategy(Strategy):
     """Trading strategy using Transformer model predictions."""
 
     # Class parameters for optimization
-    min_confidence = 0.6
+    min_confidence = 0.52  # Lowered from 0.6 to allow more trades
     position_size = 0.2
     max_drawdown = 0.2
     rsi_window = 14
@@ -45,8 +45,9 @@ class TransformerStrategy(Strategy):
         if np.isnan(self.predictions['direction'][-1]):
             return False
 
-        # Check confidence level
-        if abs(self.predictions['direction'][-1] - 0.5) < self.min_confidence:
+        # Check confidence level (less restrictive)
+        confidence = abs(self.predictions['direction'][-1] - 0.5)
+        if confidence < (self.min_confidence - 0.5):  # Adjusted threshold calculation
             return False
 
         # Check drawdown limit
@@ -57,6 +58,10 @@ class TransformerStrategy(Strategy):
         # Update equity peak
         if self.equity > self.equity_peak:
             self.equity_peak = self.equity
+
+        # Additional trading conditions
+        if self.position:  # If we have a position, be more conservative
+            return False
 
         return True
 
@@ -105,7 +110,7 @@ class TransformerStrategy(Strategy):
         price_risk = atr * 2  # Use 2x ATR for initial stop distance
 
         # Calculate position size based on risk
-        size = risk_per_trade / price_risk
+        size = risk_per_trade / (current_price * self.stop_loss)
 
         # Limit position size
         max_size = self.equity * 0.5 / current_price  # Maximum 50% of equity

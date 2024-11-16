@@ -15,13 +15,32 @@ data['SMA_20'] = data['Close'].rolling(window=20).mean()
 data['MACD'] = data['Close'].ewm(span=12).mean() - data['Close'].ewm(span=26).mean()
 data['Signal_Line'] = data['MACD'].ewm(span=9).mean()
 
-# Generate dummy predictions
+# Generate more realistic predictions for testing
 n_samples = len(data)
-price_pred = np.random.normal(data['Close'].mean(), data['Close'].std(), n_samples)
-direction_pred = np.random.uniform(0, 1, n_samples)
+# Price predictions: Use a simple moving average + noise
+price_pred = data['Close'].rolling(window=20).mean().values
+price_pred += np.random.normal(0, data['Close'].std() * 0.1, n_samples)
 
-# Run evaluation
+# Direction predictions: Generate based on price momentum
+momentum = data['Close'].pct_change(periods=5).values
+direction_pred = 1 / (1 + np.exp(-10 * momentum))  # Sigmoid transform
+direction_pred = np.nan_to_num(direction_pred, nan=0.5)  # Handle NaN values
+
+# Initialize evaluator and set predictions
 evaluator = BacktestEvaluator(data)
-evaluator.set_predictions({'price': price_pred, 'direction': direction_pred})
+evaluator.set_predictions({
+    'price': price_pred,
+    'direction': direction_pred
+})
+
+# Run evaluation with debug output
+print("\nRunning evaluation with debug mode...")
 report = evaluator.generate_evaluation_report()
 print('\nEvaluation Report:\n', report)
+
+# Print additional debug information
+print("\nData Statistics:")
+print(f"Total samples: {n_samples}")
+print(f"Direction predictions > 0.5: {np.sum(direction_pred > 0.5)}")
+print(f"Direction predictions < 0.5: {np.sum(direction_pred < 0.5)}")
+print(f"Average direction confidence: {np.mean(np.abs(direction_pred - 0.5)):.4f}")
