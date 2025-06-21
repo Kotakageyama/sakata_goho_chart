@@ -1,0 +1,46 @@
+# Trading Bot Configuration
+
+# Data Settings
+data:
+    default_symbol: "SOL/USDT"
+    default_timeframe: "1d"
+    default_limit: 1000
+    exchange: "kucoin"
+
+# Model Settings
+model:
+    type: "transformer"
+    num_heads: 8
+    ff_dim: 32
+    num_layers: 2
+    dropout_rate: 0.1
+    epochs: 50
+    batch_size: 32
+    learning_rate: 0.001
+
+# Backtesting Settings
+backtesting:
+    initial_cash: 10000
+    commission: 0.002
+    test_size: 0.2
+
+# Technical Indicators
+indicators:
+    sma_periods: [10, 20, 50]
+    rsi_period: 14
+    bb_period: 20
+    atr_period: 14
+
+# File Paths
+paths:
+    models_dir: "models/"
+    data_dir: "data/"
+    results_dir: "results/"
+    model_file: "transformer_model.h5"
+    scaler_file: "scaler.pkl"
+
+# Sakata Patterns
+sakata:
+    enabled: true
+    patterns: ["aka_sanpei", "kuro_sanpei"]
+    analysis_days_ahead: 5
