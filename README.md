@@ -1,125 +1,189 @@
-# Trading Bot - 酒田五法 & Transformer Model
+# KuCoin Bot - 暗号通貨取引ボット
 
-暗号通貨取引のための Transformer モデルと酒田五法パターン分析を組み合わせた trading bot プロジェクトです。
+このプロジェクトは、機械学習を用いた暗号通貨取引ボットです。Google Colab での実行を前提とした軽量で効率的な設計になっています。
 
-## プロジェクト構造
+## 📁 プロジェクト構成
 
-```
-sakata_goho_chart/
-├── src/                    # 共通のPythonコード
-│   ├── __init__.py
-│   ├── data_fetcher.py     # データ取得機能
-│   ├── technical_indicators.py  # テクニカル指標計算
-│   ├── sakata_patterns.py  # 酒田五法パターン検出
-│   └── utils.py           # ユーティリティ関数
+```md
+project-root/
 ├── notebooks/
-│   ├── training/          # モデルトレーニング用
-│   │   └── transformer_model_training.ipynb
-│   ├── backtesting/       # バックテスト用
-│   │   └── strategy_backtesting.ipynb
-│   └── analysis/          # 分析・可視化用
-│       └── sakata_pattern_analysis.ipynb
-├── models/               # 保存されたモデル
-├── data/                 # データファイル
-├── config/               # 設定ファイル
-│   └── config.yaml
-├── results/              # 結果・レポート保存
-├── requirements.txt      # 依存関係
+│   ├── 01_fetch_data.py         # ISSUE #1: データ取得・前処理
+│   ├── 02_train_model.py        # ISSUE #2: モデル学習
+│   └── 03_backtest.py           # ISSUE #3: バックテスト
+├── utils/                       # Colab から import する軽量 .py
+│   ├── drive_io.py              # GDrive マウント & 共通入出力
+│   └── indicators.py            # テクニカル指標など
+├── tests/                       # pytest で utils を単体テスト
+├── requirements.txt
 └── README.md
 ```
 
-## セットアップ
+## 🎯 設計思想
 
-1. 依存関係のインストール：
+- **3つのノートブック**: データ取得 → モデル学習 → バックテストの明確な分離
+- **軽量utils**: Colab で `sys.path.append()` 後に簡単import
+- **Jupytext管理**: `.py` ファイルでGit管理、Colabでは `.ipynb` 実行
+- **実験ブランチ**: 実験セルが肥大化したら新ブランチで複製運用
+
+## 🚀 セットアップ
+
+### Google Colab での実行
+
+1. **プロジェクトをGoogle Driveにアップロード**
+   ```bash
+   # Google Drive > MyDrive > kucoin_bot/ に配置
+   ```
+
+2. **Colab でセットアップ**
+   ```python
+   # 各ノートブックの最初のセルで実行
+   from google.colab import drive
+   drive.mount('/content/drive')
+   
+   import sys
+   sys.path.append('/content/drive/MyDrive/kucoin_bot')
+   
+   # 必要なライブラリをインストール
+   !pip install ccxt pandas-ta pyti ta scikit-learn lightgbm xgboost
+   ```
+
+3. **ノートブックを順番に実行**
+   - `01_fetch_data.py` → `02_train_model.py` → `03_backtest.py`
+
+### ローカル環境での実行
 
 ```bash
+git clone <repository-url>
+cd kucoin_bot
 pip install -r requirements.txt
+
+# Jupytextでノートブック変換
+pip install jupytext
+jupytext --to notebook notebooks/*.py
+
+# テスト実行
+pytest tests/
 ```
 
-2. API 設定（KuCoin）：
+## 📊 機能概要
 
--   KuCoin API キー、シークレット、パスフレーズを取得
--   Google Colab 使用時は userdata に設定
--   ローカル使用時は環境変数または設定ファイルで管理
+### 01_fetch_data.py
+- KuCoin APIからOHLCVデータ取得
+- テクニカル指標計算 (SMA, RSI, MACD, ATR, ボリンジャーバンド)
+- 酒田五法パターン検出 (十字線、ハンマー、包み線等)
+- データクリーニング・保存
 
-## 使用方法
+### 02_train_model.py
+- 複数アルゴリズムでの機械学習 (RandomForest, LightGBM, XGBoost, SVM等)
+- ディープラーニングモデル (CNN, LSTM)
+- クロスバリデーション・ハイパーパラメータ最適化
+- モデル評価・選択・保存
 
-### 1. モデルトレーニング
+### 03_backtest.py
+- 学習済みモデルによる取引シグナル生成
+- 包括的バックテスト実行
+- パフォーマンス分析 (シャープレシオ、最大ドローダウン等)
+- Buy&Hold戦略との比較
+- リスク評価・パラメータ最適化
 
-`notebooks/training/transformer_model_training.ipynb`を実行：
+## 🛠 ユーティリティ
 
--   データ取得
--   テクニカル指標計算
--   Transformer モデル訓練
--   モデル保存
+### utils/drive_io.py
+- Google Drive マウント・パス管理
+- データ保存・読み込み (CSV, PKL対応)
+- KuCoin APIデータ取得クラス
+- モデル・スケーラー保存・読み込み
+- バックテスト用ユーティリティ
 
-### 2. バックテスト
+### utils/indicators.py
+- テクニカル指標計算クラス
+- 酒田五法パターン検出クラス
+- ラグ特徴量生成
+- 包括的特徴量作成関数
 
-`notebooks/backtesting/strategy_backtesting.ipynb`を実行：
+## 🧪 テスト
 
--   保存されたモデル読み込み
--   戦略バックテスト実行
--   パフォーマンス分析
+```bash
+# 単体テスト実行
+pytest tests/test_indicators.py -v
 
-### 3. 酒田五法分析
+# テストカバレッジ確認
+pytest tests/ --cov=utils --cov-report=html
+```
 
-`notebooks/analysis/sakata_pattern_analysis.ipynb`を実行：
+## 📋 設定例
 
--   パターン検出
--   有効性分析
--   可視化
+### API設定 (01_fetch_data.py内)
+```python
+API_CONFIG = {
+    'api_key': 'your-kucoin-api-key',
+    'secret': 'your-kucoin-secret', 
+    'password': 'your-kucoin-passphrase'
+}
 
-## 主要機能
+SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'ADA/USDT', 'SOL/USDT']
+TIMEFRAME = '1d'
+LIMIT = 1000
+```
 
-### データ取得 (`src/data_fetcher.py`)
+### モデル設定 (02_train_model.py内)
+```python
+TARGET_SYMBOL = 'BTC/USDT'
+PREDICTION_HORIZON = 1  # 何日後を予測
+TEST_SIZE = 0.2
+RANDOM_STATE = 42
+```
 
--   取引所 API からの OHLCV データ取得
--   複数通貨ペア対応
--   レート制限対応
+### バックテスト設定 (03_backtest.py内)
+```python
+INITIAL_CAPITAL = 10000
+TRANSACTION_COST = 0.001  # 0.1%
+MIN_CONFIDENCE = 0.6
+STOP_LOSS = 0.05         # 5%
+TAKE_PROFIT = 0.10       # 10%
+```
 
-### テクニカル指標 (`src/technical_indicators.py`)
+## 📈 出力ファイル
 
--   移動平均線 (SMA)
--   RSI
--   MACD
--   ATR
--   ボリンジャーバンド
--   ta-lib の全指標
+### データファイル
+- `raw_crypto_data.pkl`: 生のOHLCVデータ
+- `processed_crypto_data.pkl`: 全特徴量付きデータ
+- `{SYMBOL}_processed.csv`: 銘柄別処理済みデータ
 
-### 酒田五法 (`src/sakata_patterns.py`)
+### モデルファイル
+- `best_model_{name}.pkl`: 最良モデル
+- `model_results.pkl`: 全モデル評価結果
+- `model_scaler.pkl`: データ正規化スケーラー
+- `deep_learning_model.h5`: DLモデル (該当時)
 
--   赤三兵パターン検出
--   黒三兵パターン検出
--   パターン有効性分析
--   チャート可視化
+### バックテストファイル
+- `backtest_results.pkl`: 詳細バックテスト結果
+- `trades_history.csv`: 取引履歴
 
-### Transformer モデル
+## 🔄 開発フロー
 
--   マルチヘッドアテンション
--   価格変動方向予測
--   カスタマイズ可能なハイパーパラメータ
+1. **ブランチ作成**: 実験用の新ブランチを作成
+2. **実験実行**: ノートブックで実験・検証
+3. **結果確認**: バックテスト結果を評価
+4. **コード整理**: 有効な手法をutilsに統合
+5. **テスト追加**: 新機能のテストケース作成
+6. **マージ**: メインブランチに統合
 
-### バックテスト機能
+## ⚠️ 注意事項
 
--   取引戦略のバックテスト
--   パフォーマンス指標計算
--   Buy & Hold 戦略との比較
+- **投資判断**: このボットの出力は投資助言ではありません
+- **リスク管理**: 実運用前に十分な検証とリスク評価を実施
+- **API利用**: KuCoin APIの利用規約を遵守
+- **データ精度**: 市場データの遅延や精度制限に注意
+- **Colab制限**: 実行時間・メモリ制限に留意
 
-## 設定
+## 🤝 コントリビューション
 
-`config/config.yaml`でプロジェクト設定をカスタマイズ可能：
+1. Issuesで課題・要望を報告
+2. 機能追加は新ブランチで開発
+3. テストケースを必ず追加
+4. PRでコードレビュー
 
--   データ設定
--   モデルパラメータ
--   バックテスト設定
--   テクニカル指標設定
+## 📄 ライセンス
 
-## 注意事項
-
--   実際の取引前に十分なテストを実施してください
--   市場リスクを理解した上で使用してください
--   このプロジェクトは教育目的であり、投資アドバイスではありません
-
-## ライセンス
-
-このプロジェクトは MIT ライセンスの下で公開されています。
+MIT License - 詳細は `LICENSE` ファイルを参照
