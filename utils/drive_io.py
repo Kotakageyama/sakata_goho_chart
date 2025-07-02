@@ -36,6 +36,44 @@ def get_project_path():
         return '.'
 
 
+def load_raw(symbol: str = "SOL_USDT", timeframe: str = "1d", limit: int = 1000) -> pd.DataFrame:
+    """
+    生データを data/raw から読み込み
+    
+    Args:
+        symbol: 通貨ペア (例: 'SOL_USDT')
+        timeframe: 時間足 (例: '1d', '1h')
+        limit: データ数
+        
+    Returns:
+        pd.DataFrame: OHLCVデータ
+    """
+    project_path = get_project_path()
+    raw_data_dir = os.path.join(project_path, "data", "raw")
+    
+    # ファイル名の構築
+    filename = f"{symbol}_{timeframe}_{limit}.csv"
+    filepath = os.path.join(raw_data_dir, filename)
+    
+    if not os.path.exists(filepath):
+        # Parquetファイルも試す
+        parquet_filename = f"{symbol}_{timeframe}_{limit}.parquet"
+        parquet_filepath = os.path.join(raw_data_dir, parquet_filename)
+        
+        if os.path.exists(parquet_filepath):
+            df = pd.read_parquet(parquet_filepath)
+        else:
+            raise FileNotFoundError(f"データファイルが見つかりません: {filepath} または {parquet_filepath}")
+    else:
+        df = pd.read_csv(filepath, index_col=0, parse_dates=True)
+    
+    print(f"✅ 生データを読み込みました: {filepath}")
+    print(f"📊 データ形状: {df.shape}")
+    print(f"📅 期間: {df.index[0]} ～ {df.index[-1]}")
+    
+    return df
+
+
 def save_data(data: Any, filename: str, data_dir: str = "data") -> None:
     """
     データを保存

@@ -342,3 +342,15 @@ def create_comprehensive_features(df: pd.DataFrame) -> pd.DataFrame:
     df = SakataPatterns.add_all_patterns(df)
     
     return df
+
+def add_all(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    全ての特徴量を追加する統一インターフェース
+    
+    Args:
+        df: OHLCVデータフレーム
+        
+    Returns:
+        pd.DataFrame: 全特徴量を追加したデータフレーム
+    """
+    return create_comprehensive_features(df)
