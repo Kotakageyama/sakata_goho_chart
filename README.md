@@ -6,8 +6,9 @@
 
 ```md
 project-root/
+├── 01_fetch_data.ipynb          # 📥 KuCoin OHLCVデータ取得 (軽量版)
 ├── notebooks/
-│   ├── 01_fetch_data.py         # ISSUE #1: データ取得・前処理
+│   ├── 01_fetch_data.py         # ISSUE #1: データ取得・前処理 (包括版)
 │   ├── 02_train_model.py        # ISSUE #2: モデル学習
 │   └── 03_backtest.py           # ISSUE #3: バックテスト
 ├── utils/                       # Colab から import する軽量 .py
@@ -34,7 +35,26 @@ project-root/
    # Google Drive > MyDrive > kucoin_bot/ に配置
    ```
 
-2. **Colab でセットアップ**
+2. **KuCoin API シークレット設定 (重要!)**
+   - Google Colab の「シークレット」機能で以下を設定:
+     - `KuCoin_API_KEY`: あなたのAPIキー
+     - `KuCoin_API_SECRET`: あなたのAPIシークレット  
+     - `KuCoin_API_PASSPHRAS`: あなたのAPIパスフレーズ
+
+3. **📥 データ取得 QuickStart (`01_fetch_data.ipynb`)**
+   ```python
+   # セル1を実行: GDriveマウント & ライブラリインストール
+   # セル2を実行: utils/drive_io.py 読み込み
+   # セル3を実行: パラメータ設定用widgets表示
+   # セル4を実行: データ取得 & 保存実行
+   ```
+   
+   **出力先**: `/content/drive/MyDrive/kucoin_bot/data/raw/`
+   - CSV & Parquet 形式で自動保存
+   - 取得行数・期間を自動表示
+   - データプレビュー表示
+
+4. **従来の詳細セットアップ (包括版)**
    ```python
    # 各ノートブックの最初のセルで実行
    from google.colab import drive
@@ -47,8 +67,8 @@ project-root/
    !pip install ccxt pandas-ta pyti ta scikit-learn lightgbm xgboost
    ```
 
-3. **ノートブックを順番に実行**
-   - `01_fetch_data.py` → `02_train_model.py` → `03_backtest.py`
+5. **ノートブックを順番に実行**
+   - `01_fetch_data.ipynb` → `02_train_model.py` → `03_backtest.py`
 
 ### ローカル環境での実行
 
