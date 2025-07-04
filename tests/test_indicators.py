@@ -49,7 +49,7 @@ class TestTechnicalIndicators:
         result = TechnicalIndicators.add_basic_indicators(sample_data)
         
         # 期待される列が追加されているかチェック
-        expected_columns = ['SMA_10', 'SMA_20', 'SMA_50', 'RSI', 'MACD', 'ATR']
+        expected_columns = ['SMA_10', 'SMA_20', 'SMA_50', 'EMA_10', 'EMA_20', 'EMA_50', 'RSI', 'MACD', 'ATR']
         for col in expected_columns:
             assert col in result.columns, f"{col} が追加されていません"
         
@@ -61,6 +61,10 @@ class TestTechnicalIndicators:
         # 移動平均線が正の値かチェック
         assert result['SMA_10'].dropna().min() > 0, "SMA_10に負の値があります"
         assert result['SMA_20'].dropna().min() > 0, "SMA_20に負の値があります"
+        
+        # EMAが正の値かチェック
+        assert result['EMA_10'].dropna().min() > 0, "EMA_10に負の値があります"
+        assert result['EMA_20'].dropna().min() > 0, "EMA_20に負の値があります"
 
     def test_calculate_rsi(self, sample_data):
         """RSI計算のテスト"""
@@ -71,6 +75,21 @@ class TestTechnicalIndicators:
         assert len(rsi_values) > 0, "RSI計算結果が空です"
         assert rsi_values.min() >= 0, "RSIが0未満です"
         assert rsi_values.max() <= 100, "RSIが100を超えています"
+
+    def test_calculate_ema(self, sample_data):
+        """EMA計算のテスト"""
+        ema = TechnicalIndicators.calculate_ema(sample_data['Close'], period=20)
+        
+        # EMAが正しく計算されているかチェック
+        ema_values = ema.dropna()
+        assert len(ema_values) > 0, "EMA計算結果が空です"
+        assert ema_values.min() > 0, "EMAに負の値があります"
+        
+        # 期間が異なるEMAのテスト
+        ema_10 = TechnicalIndicators.calculate_ema(sample_data['Close'], period=10)
+        ema_50 = TechnicalIndicators.calculate_ema(sample_data['Close'], period=50)
+        
+        assert len(ema_10.dropna()) >= len(ema_50.dropna()), "短期EMAの方がデータ数が少ないです"
 
     def test_add_bollinger_bands(self, sample_data):
         """ボリンジャーバンドのテスト"""
