@@ -180,7 +180,89 @@ TAKE_PROFIT = 0.10       # 10%
 - `backtest_results.pkl`: 詳細バックテスト結果
 - `trades_history.csv`: 取引履歴
 
-## 🔄 開発フロー
+## 🤖 LLM エージェント ワークフロー
+
+### ブランチ運用ルール
+**命名規則**: `model/<strategy>/<yyyymmdd>`
+
+```bash
+# 例: LSTM戦略の2024年12月1日ブランチ
+model/lstm/20241201
+
+# 例: Transformer戦略の2024年12月2日ブランチ  
+model/transformer/20241202
+
+# 例: アンサンブル戦略の2024年12月3日ブランチ
+model/ensemble/20241203
+```
+
+### 自動化ワークフロー
+
+LLMエージェントが以下の手順を自動実行できます:
+
+1. **ブランチ作成** → 2. **学習セル実行** → 3. **PR作成**
+
+```bash
+# 🚀 ワンコマンドで完全ワークフロー実行
+./scripts/agent_workflow.sh run <strategy>
+
+# 例: LSTM戦略の完全ワークフロー
+./scripts/agent_workflow.sh run lstm
+
+# 例: 指定日付でTransformer戦略実行
+./scripts/agent_workflow.sh run transformer 20241201
+```
+
+### エージェント用コマンド
+
+```bash
+# ブランチ作成のみ
+./scripts/agent_workflow.sh create <strategy> [date]
+
+# ワークフロー状態確認
+./scripts/agent_workflow.sh status
+
+# モデルブランチ一覧
+./scripts/agent_workflow.sh list
+
+# ブランチ名検証
+./scripts/agent_workflow.sh validate model/lstm/20241201
+
+# ヘルプ表示
+./scripts/agent_workflow.sh help
+```
+
+### Python API (上級者向け)
+
+```python
+# ブランチ管理
+from scripts.branch_manager import BranchManager
+manager = BranchManager()
+branch = manager.create_branch("lstm")
+
+# 完全ワークフロー実行
+from scripts.agent_workflow import AgentWorkflow
+workflow = AgentWorkflow()
+success = workflow.run_workflow("transformer")
+```
+
+### 設定ファイル
+
+```bash
+# カスタム設定でワークフロー実行
+./scripts/agent_workflow.sh run lstm --config config/custom.json
+
+# 設定例をコピー
+cp config/agent_workflow.example.json config/my_strategy.json
+```
+
+**対応戦略**:
+- `lstm`: 時系列予測用LSTM
+- `transformer`: Transformer架構
+- `ensemble`: アンサンブルモデル
+- `technical`: テクニカル分析+ML
+
+## 🔄 従来の開発フロー
 
 1. **ブランチ作成**: 実験用の新ブランチを作成
 2. **実験実行**: ノートブックで実験・検証
