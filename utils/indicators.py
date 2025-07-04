@@ -43,6 +43,11 @@ class TechnicalIndicators:
         df["SMA_20"] = df["Close"].rolling(window=20).mean()
         df["SMA_50"] = df["Close"].rolling(window=50).mean()
 
+        # 指数移動平均線
+        df["EMA_10"] = TechnicalIndicators.calculate_ema(df["Close"], 10)
+        df["EMA_20"] = TechnicalIndicators.calculate_ema(df["Close"], 20)
+        df["EMA_50"] = TechnicalIndicators.calculate_ema(df["Close"], 50)
+
         # 自前RSI計算
         df["RSI"] = TechnicalIndicators.calculate_rsi(df["Close"])
 
@@ -63,6 +68,20 @@ class TechnicalIndicators:
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
         rs = gain / loss
         return 100 - (100 / (1 + rs))
+
+    @staticmethod
+    def calculate_ema(series: pd.Series, period: int = 20) -> pd.Series:
+        """
+        EMA (Exponential Moving Average) を計算
+        
+        Args:
+            series: 価格シリーズ
+            period: 期間
+            
+        Returns:
+            pd.Series: EMA値
+        """
+        return series.ewm(span=period, adjust=False).mean()
 
     @staticmethod
     def calculate_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.Series:

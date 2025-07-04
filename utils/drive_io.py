@@ -126,6 +126,58 @@ def load_data(filename: str, data_dir: str = "data") -> Any:
         raise ValueError("サポートされていないファイル形式")
 
 
+def save_df(df: pd.DataFrame, path: str) -> None:
+    """
+    DataFrameを保存 (Issue #4 要件対応)
+    
+    Args:
+        df: 保存するDataFrame
+        path: 保存パス
+    """
+    # パスからディレクトリを作成
+    os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
+    
+    if path.endswith('.csv'):
+        df.to_csv(path, index=True)
+    elif path.endswith('.parquet'):
+        df.to_parquet(path, index=True)
+    elif path.endswith('.pkl'):
+        with open(path, 'wb') as f:
+            pickle.dump(df, f)
+    else:
+        # デフォルトはCSV
+        if not path.endswith('.csv'):
+            path += '.csv'
+        df.to_csv(path, index=True)
+    
+    print(f"DataFrameを保存しました: {path}")
+
+
+def load_df(path: str) -> pd.DataFrame:
+    """
+    DataFrameを読み込み (Issue #4 要件対応)
+    
+    Args:
+        path: 読み込みパス
+        
+    Returns:
+        pd.DataFrame: 読み込んだDataFrame
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"ファイルが見つかりません: {path}")
+    
+    if path.endswith('.csv'):
+        return pd.read_csv(path, index_col=0, parse_dates=True)
+    elif path.endswith('.parquet'):
+        return pd.read_parquet(path)
+    elif path.endswith('.pkl'):
+        with open(path, 'rb') as f:
+            return pickle.load(f)
+    else:
+        # デフォルトはCSVとして読み込み
+        return pd.read_csv(path, index_col=0, parse_dates=True)
+
+
 class DataFetcher:
     """暗号通貨データ取得クラス"""
 
